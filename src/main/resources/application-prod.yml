@@ -1,0 +1,8 @@
+spring:
+  datasource:
+    url: ${MUHOU_DB_URL:jdbc:mysql://127.0.0.1:3306/muhou?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true}
+    username: ${MUHOU_DB_USERNAME:root}
+    password: ${MUHOU_DB_PASSWORD:1234}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  flyway:
+    enabled: true

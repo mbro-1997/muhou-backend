@@ -1,0 +1,16 @@
+spring:
+  datasource:
+    url: jdbc:mysql://127.0.0.1:3306/muhou?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+    username: root
+    password: 1234
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  flyway:
+    enabled: true
+
+muhou:
+  auth:
+    allow-profile-role-fallback: false
+    token-secret: muhou-dev-token-secret
+  wechat:
+    app-id: ${WECHAT_MINIAPP_APP_ID:wx5ef0b470620e51d6}
+    app-secret: ${WECHAT_MINIAPP_APP_SECRET:}

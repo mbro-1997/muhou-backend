@@ -1,0 +1,56 @@
+spring:
+  application:
+    name: muhou-backend
+  profiles:
+    active: dev
+  jackson:
+    default-property-inclusion: non_null
+    time-zone: Asia/Shanghai
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+
+server:
+  port: 8078
+  servlet:
+    encoding:
+      charset: UTF-8
+      enabled: true
+      force: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+mybatis:
+  mapper-locations: classpath*:mapper/**/*.xml
+  type-aliases-package: com.muhou.backend.infrastructure.persistence.entity
+  configuration:
+    map-underscore-to-camel-case: true
+    call-setters-on-nulls: true
+    jdbc-type-for-null: 'NULL'
+
+muhou:
+  auth:
+    demo-login-enabled: true
+  wechat:
+    mock-enabled: true
+    app-id: ${WECHAT_MINIAPP_APP_ID:}
+    app-secret: ${WECHAT_MINIAPP_APP_SECRET:}
+  payment:
+    mock-enabled: true
+    mch-id: ""
+    app-id: ""
+    private-key-path: ""
+    merchant-serial-no: ""
+    api-v3-key: ""
+    notify-url: ""
+    refund-notify-url: ""
+  order:
+    timeout-auto-cancel-enabled: true
+    timeout-cleanup-delay-ms: 60000
+    auto-good-review-enabled: true
+    auto-good-review-delay-ms: 3600000
