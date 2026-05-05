@@ -6,15 +6,20 @@ import com.muhou.backend.common.exception.BizException;
 import com.muhou.backend.common.support.CurrentUserSupport;
 import com.muhou.backend.common.support.StatusTextHelper;
 import com.muhou.backend.common.util.MoneyUtils;
+import com.muhou.backend.infrastructure.client.WechatMiniappCodeGateway;
 import com.muhou.backend.infrastructure.persistence.entity.PropAuditEntity;
 import com.muhou.backend.infrastructure.persistence.entity.PropEntity;
 import com.muhou.backend.infrastructure.persistence.entity.PropImageEntity;
+import com.muhou.backend.infrastructure.persistence.entity.PropQrCodeEntity;
 import com.muhou.backend.infrastructure.persistence.mapper.PropAuditMapper;
 import com.muhou.backend.infrastructure.persistence.mapper.PropImageMapper;
 import com.muhou.backend.infrastructure.persistence.mapper.PropMapper;
+import com.muhou.backend.infrastructure.persistence.mapper.PropQrCodeMapper;
 import com.muhou.backend.infrastructure.persistence.mapper.UserRoleMapper;
 import com.muhou.backend.web.request.CreatePropRequest;
 import com.muhou.backend.web.response.PropResponse;
+import com.muhou.backend.web.response.QrCodeResolveResponse;
+import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -24,6 +29,7 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Arrays;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 @Service
@@ -34,17 +40,26 @@ public class PropApplicationService {
     private final PropMapper propMapper;
     private final PropAuditMapper propAuditMapper;
     private final PropImageMapper propImageMapper;
+    private final PropQrCodeMapper propQrCodeMapper;
+    private final WechatMiniappCodeGateway wechatMiniappCodeGateway;
+    private final QrCodeArchiveService qrCodeArchiveService;
     private final CurrentUserSupport currentUserSupport;
     private final UserRoleMapper userRoleMapper;
 
     public PropApplicationService(PropMapper propMapper,
                                   PropAuditMapper propAuditMapper,
                                   PropImageMapper propImageMapper,
+                                  PropQrCodeMapper propQrCodeMapper,
+                                  WechatMiniappCodeGateway wechatMiniappCodeGateway,
+                                  QrCodeArchiveService qrCodeArchiveService,
                                   CurrentUserSupport currentUserSupport,
                                   UserRoleMapper userRoleMapper) {
         this.propMapper = propMapper;
         this.propAuditMapper = propAuditMapper;
         this.propImageMapper = propImageMapper;
+        this.propQrCodeMapper = propQrCodeMapper;
+        this.wechatMiniappCodeGateway = wechatMiniappCodeGateway;
+        this.qrCodeArchiveService = qrCodeArchiveService;
         this.currentUserSupport = currentUserSupport;
         this.userRoleMapper = userRoleMapper;
     }
@@ -117,8 +132,12 @@ public class PropApplicationService {
 
     @Transactional
     public PropResponse createPendingFillProp() {
+        Long adminUserId = currentUserSupport.requireCurrentUserId();
+        requireAdminRole();
         LocalDateTime now = LocalDateTime.now();
-        String qrCodeId = "QR-" + now.format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss")) + "-" + (int) (Math.random() * 9000 + 1000);
+        String qrCodeId = "QR-" + now.format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss")) + "-" + UUID.randomUUID().toString().substring(0, 8);
+        String qrPage = "pages/qr-entry/index";
+        String qrScene = "q=" + qrCodeId;
 
         PropEntity entity = new PropEntity();
         entity.setSupplierUserId(null);
@@ -127,11 +146,27 @@ public class PropApplicationService {
         entity.setPropStatus("offline");
         entity.setAuditStatus("pending");
         entity.setQrCodeId(qrCodeId);
-        entity.setQrCodeUrl(qrCodeId);
+        entity.setQrCodeUrl("/api/qrcodes/" + qrCodeId + "/image");
         entity.setFillStatus("pending_fill");
-        entity.setRemark("管理员预生成二维码，待工厂扫码录入后再绑定归属");
+        entity.setRemark("管理员预生成小程序码，待工厂扫码录入后再绑定归属");
         propMapper.insertPendingFill(entity);
         replaceImages(entity.getId(), List.of(REAL_PROP_IMAGE_URL));
+
+        byte[] imageBytes = wechatMiniappCodeGateway.generateUnlimited(qrScene, qrPage);
+        QrCodeArchiveService.QrCodeArchiveResult archiveResult = qrCodeArchiveService.save(qrCodeId, imageBytes);
+        propMapper.updateQrCodeUrl(entity.getId(), archiveResult.imageUrl());
+
+        PropQrCodeEntity qrCode = new PropQrCodeEntity();
+        qrCode.setPropId(entity.getId());
+        qrCode.setQrCodeId(qrCodeId);
+        qrCode.setQrScene(qrScene);
+        qrCode.setQrPage(qrPage);
+        qrCode.setQrImageUrl(archiveResult.imageUrl());
+        qrCode.setQrImageStorageKey(archiveResult.storageKey());
+        qrCode.setImageSha256(archiveResult.sha256());
+        qrCode.setStatus("unused");
+        qrCode.setCreatedByAdminUserId(adminUserId);
+        propQrCodeMapper.insert(qrCode);
         return getProp(entity.getId());
     }
 
@@ -145,13 +180,15 @@ public class PropApplicationService {
             throw new BizException(ResultCode.CONFLICT, "该道具已绑定工厂，不可重复录入");
         }
 
+        Long supplierUserId = currentSupplierUserId();
         PropEntity entity = buildFilledEntity(existing, request);
         entity.setId(existing.getId());
-        entity.setSupplierUserId(currentSupplierUserId());
+        entity.setSupplierUserId(supplierUserId);
         entity.setQrCodeId(existing.getQrCodeId());
         entity.setQrCodeUrl(existing.getQrCodeUrl());
         entity.setRemark("工厂扫码录入并提交审核");
         propMapper.updatePendingFill(entity);
+        propQrCodeMapper.markFilled(entity.getId(), supplierUserId);
         replaceImages(entity.getId(), normalizeRequestImages(request));
         createAuditRecord(entity.getId(), "create", "工厂补全扫码入库资料，待管理员确认");
         return getProp(entity.getId());
@@ -201,8 +238,78 @@ public class PropApplicationService {
         response.setAuditStatusText(StatusTextHelper.auditStatusText(entity.getAuditStatus()));
         response.setQrCodeId(entity.getQrCodeId());
         response.setQrCodeUrl(entity.getQrCodeUrl());
+        response.setQrStatus(resolveQrStatus(entity));
         response.setFillStatus(entity.getFillStatus());
         return response;
+    }
+
+    public QrCodeResolveResponse resolveQrCode(String qrCodeId) {
+        if (qrCodeId == null || qrCodeId.isBlank()) {
+            throw new BizException(ResultCode.VALIDATION_ERROR, "二维码参数不能为空");
+        }
+        PropQrCodeEntity qrCode = propQrCodeMapper.selectByQrCodeId(qrCodeId.trim());
+        if (qrCode == null || "revoked".equals(qrCode.getStatus())) {
+            return buildQrMessage(qrCodeId, "revoked", null, "message", "二维码不存在或已作废");
+        }
+        PropEntity prop = propMapper.selectById(qrCode.getPropId());
+        if (prop == null) {
+            return buildQrMessage(qrCodeId, qrCode.getStatus(), null, "message", "二维码对应的道具不存在");
+        }
+
+        QrCodeResolveResponse response = buildQrMessage(qrCodeId, qrCode.getStatus(), prop, "message", "请按当前身份继续操作");
+        if ("filled".equals(prop.getFillStatus()) && "approved".equals(prop.getAuditStatus()) && !"offline".equals(prop.getPropStatus())) {
+            response.setRedirectType("prop_detail");
+            response.setMessage("道具已登记，可查看道具详情");
+            return response;
+        }
+
+        if (currentUserSupport.getCurrentSession() == null) {
+            response.setRedirectType("login_required");
+            response.setMessage("请先登录后继续扫码流程");
+            return response;
+        }
+
+        Long currentUserId = currentUserSupport.requireCurrentUserId();
+        List<String> roleBindings = userRoleMapper.selectRoleCodesByUserId(currentUserId);
+        if ("pending_fill".equals(prop.getFillStatus())) {
+            if (roleBindings.contains("supplier")) {
+                response.setRedirectType("inventory_form");
+                response.setMessage("请补全道具入库资料并提交审核");
+                return response;
+            }
+            response.setRedirectType("message");
+            response.setMessage("该道具尚未录入，当前账号不能填报道具资料");
+            return response;
+        }
+
+        response.setRedirectType("message");
+        response.setMessage("该道具当前不可通过二维码处理");
+        return response;
+    }
+
+    public Resource getQrCodeImage(String qrCodeId) {
+        PropQrCodeEntity qrCode = propQrCodeMapper.selectByQrCodeId(qrCodeId);
+        if (qrCode == null || "revoked".equals(qrCode.getStatus())) {
+            throw new BizException(ResultCode.NOT_FOUND, "二维码不存在或已作废");
+        }
+        Resource resource = qrCodeArchiveService.loadRequired(qrCode.getQrImageStorageKey());
+        propQrCodeMapper.markDownloaded(qrCodeId);
+        return resource;
+    }
+
+    @Transactional
+    public List<PropResponse> revokePendingQrCode(Long propId) {
+        requireAdminRole();
+        PropEntity prop = requireProp(propId);
+        if (!"pending_fill".equals(prop.getFillStatus())) {
+            throw new BizException(ResultCode.CONFLICT, "只有未登记二维码可以作废");
+        }
+        int updated = propQrCodeMapper.revokeByPropId(propId, currentUserSupport.requireCurrentUserId());
+        if (updated == 0) {
+            throw new BizException(ResultCode.CONFLICT, "二维码已登记或已作废，不能重复作废");
+        }
+        propMapper.revokePendingFill(propId, "管理员已作废该二维码");
+        return listAdminQrCodeProps();
     }
 
     private PropEntity buildFilledEntity(PropEntity entity, CreatePropRequest request) {
@@ -333,6 +440,46 @@ public class PropApplicationService {
             return "已驳回";
         }
         return StatusTextHelper.propStatusText(entity.getPropStatus());
+    }
+
+    private String resolveQrStatus(PropEntity entity) {
+        if (entity.getQrCodeId() == null || entity.getQrCodeId().isBlank()) {
+            return null;
+        }
+        PropQrCodeEntity qrCode = propQrCodeMapper.selectByQrCodeId(entity.getQrCodeId());
+        if (qrCode != null) {
+            return qrCode.getStatus();
+        }
+        if ("pending_fill".equals(entity.getFillStatus())) {
+            return "unused";
+        }
+        if ("revoked".equals(entity.getFillStatus())) {
+            return "revoked";
+        }
+        if ("filled".equals(entity.getFillStatus())) {
+            return "filled";
+        }
+        return null;
+    }
+
+    private QrCodeResolveResponse buildQrMessage(String qrCodeId,
+                                                String qrStatus,
+                                                PropEntity prop,
+                                                String redirectType,
+                                                String message) {
+        QrCodeResolveResponse response = new QrCodeResolveResponse();
+        response.setQrCodeId(qrCodeId);
+        response.setQrStatus(qrStatus);
+        response.setRedirectType(redirectType);
+        response.setMessage(message);
+        if (prop != null) {
+            response.setPropId(prop.getId());
+            response.setPropName(prop.getPropName());
+            response.setFillStatus(prop.getFillStatus());
+            response.setAuditStatus(prop.getAuditStatus());
+            response.setPropStatus(prop.getPropStatus());
+        }
+        return response;
     }
 
     private List<String> parseImages(String imageUrl) {

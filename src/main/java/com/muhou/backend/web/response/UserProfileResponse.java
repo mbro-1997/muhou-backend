@@ -7,6 +7,7 @@ public class UserProfileResponse {
     private Long id;
     private String nickname;
     private String avatarUrl;
+    private String phone;
     private String currentRole;
     private List<String> roleBindings;
     private String registerStatus;
@@ -23,6 +24,8 @@ public class UserProfileResponse {
     public void setNickname(String nickname) { this.nickname = nickname; }
     public String getAvatarUrl() { return avatarUrl; }
     public void setAvatarUrl(String avatarUrl) { this.avatarUrl = avatarUrl; }
+    public String getPhone() { return phone; }
+    public void setPhone(String phone) { this.phone = phone; }
     public String getCurrentRole() { return currentRole; }
     public void setCurrentRole(String currentRole) { this.currentRole = currentRole; }
     public List<String> getRoleBindings() { return roleBindings; }

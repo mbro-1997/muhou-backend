@@ -4,9 +4,12 @@ import com.muhou.backend.common.api.ResultCode;
 import com.muhou.backend.common.exception.BizException;
 import com.muhou.backend.common.support.CurrentUserSession;
 import com.muhou.backend.common.support.CurrentUserSupport;
+import com.muhou.backend.infrastructure.client.WechatPhoneGateway;
+import com.muhou.backend.infrastructure.client.WechatPhoneNumberResult;
 import com.muhou.backend.infrastructure.persistence.entity.UserEntity;
 import com.muhou.backend.infrastructure.persistence.mapper.UserMapper;
 import com.muhou.backend.infrastructure.persistence.mapper.UserRoleMapper;
+import com.muhou.backend.web.request.UserProfileUpdateRequest;
 import com.muhou.backend.web.response.AdminUserResponse;
 import com.muhou.backend.web.response.UserProfileResponse;
 import org.springframework.stereotype.Service;
@@ -21,15 +24,18 @@ public class UserApplicationService {
     private final UserRoleMapper userRoleMapper;
     private final CurrentUserSupport currentUserSupport;
     private final FactoryOnboardingApplicationService factoryOnboardingApplicationService;
+    private final WechatPhoneGateway wechatPhoneGateway;
 
     public UserApplicationService(UserMapper userMapper,
                                   UserRoleMapper userRoleMapper,
                                   CurrentUserSupport currentUserSupport,
-                                  FactoryOnboardingApplicationService factoryOnboardingApplicationService) {
+                                  FactoryOnboardingApplicationService factoryOnboardingApplicationService,
+                                  WechatPhoneGateway wechatPhoneGateway) {
         this.userMapper = userMapper;
         this.userRoleMapper = userRoleMapper;
         this.currentUserSupport = currentUserSupport;
         this.factoryOnboardingApplicationService = factoryOnboardingApplicationService;
+        this.wechatPhoneGateway = wechatPhoneGateway;
     }
 
     public UserProfileResponse getCurrentUser(String ignoredRole) {
@@ -50,6 +56,7 @@ public class UserApplicationService {
         response.setId(user.getId());
         response.setNickname(user.getNickname());
         response.setAvatarUrl(user.getAvatarUrl());
+        response.setPhone(user.getPhone());
         response.setCurrentRole(snapshot.getCurrentRole());
         response.setRoleBindings(snapshot.getRoleBindings());
         response.setRegisterStatus(snapshot.getRegisterStatus());
@@ -60,6 +67,22 @@ public class UserApplicationService {
         response.setRealnameVerified(user.getRealnameVerified() != null && user.getRealnameVerified() == 1);
         response.setStudentVerified(user.getStudentVerified() != null && user.getStudentVerified() == 1);
         return response;
+    }
+
+    public UserProfileResponse updateCurrentUserProfile(UserProfileUpdateRequest request) {
+        Long userId = currentUserSupport.requireCurrentUserId();
+        UserEntity user = requireUser(userId);
+        String nickname = normalizeNickname(request.getNickname(), user.getNickname());
+        String avatarUrl = normalizeAvatarUrl(request.getAvatarUrl(), user.getAvatarUrl());
+        userMapper.updateProfile(userId, nickname, avatarUrl);
+        return getCurrentUser(null);
+    }
+
+    public UserProfileResponse bindCurrentUserWechatPhone(String code) {
+        Long userId = currentUserSupport.requireCurrentUserId();
+        WechatPhoneNumberResult result = wechatPhoneGateway.getPhoneNumber(code);
+        userMapper.updatePhone(userId, result.getPhoneNumber());
+        return getCurrentUser(null);
     }
 
     public List<AdminUserResponse> listAdminUsers() {
@@ -151,6 +174,22 @@ public class UserApplicationService {
             throw new BizException(ResultCode.VALIDATION_ERROR, "不支持的角色类型: " + role);
         }
         return normalized;
+    }
+
+    private String normalizeNickname(String value, String fallback) {
+        String normalized = value == null ? "" : value.trim();
+        if (normalized.isBlank()) {
+            return fallback == null || fallback.isBlank() ? "微信用户" : fallback;
+        }
+        return normalized.length() > 64 ? normalized.substring(0, 64) : normalized;
+    }
+
+    private String normalizeAvatarUrl(String value, String fallback) {
+        String normalized = value == null ? "" : value.trim();
+        if (normalized.isBlank()) {
+            return fallback == null || fallback.isBlank() ? "/images/avatar.png" : fallback;
+        }
+        return normalized.length() > 500 ? normalized.substring(0, 500) : normalized;
     }
 
     private String userStatusText(String status) {

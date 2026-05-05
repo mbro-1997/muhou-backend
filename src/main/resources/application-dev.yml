@@ -12,5 +12,5 @@ muhou:
     allow-profile-role-fallback: false
     token-secret: muhou-dev-token-secret
   wechat:
-    app-id: ${WECHAT_MINIAPP_APP_ID:wx5ef0b470620e51d6}
-    app-secret: ${WECHAT_MINIAPP_APP_SECRET:}
+    app-id: ${WECHAT_MINIAPP_APP_ID:wxaf7914ed6be3ebdb}
+    app-secret: ${WECHAT_MINIAPP_APP_SECRET:c48a8882138bcc84323ffb477a3bd2ce}

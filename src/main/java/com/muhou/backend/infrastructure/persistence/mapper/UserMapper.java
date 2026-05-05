@@ -28,4 +28,12 @@ public interface UserMapper {
 
     @Update("UPDATE sys_user SET register_status = #{registerStatus}, updated_at = NOW() WHERE id = #{id}")
     int updateRegisterStatus(@Param("id") Long id, @Param("registerStatus") String registerStatus);
+
+    @Update("UPDATE sys_user SET nickname = #{nickname}, avatar_url = #{avatarUrl}, updated_at = NOW() WHERE id = #{id}")
+    int updateProfile(@Param("id") Long id,
+                      @Param("nickname") String nickname,
+                      @Param("avatarUrl") String avatarUrl);
+
+    @Update("UPDATE sys_user SET phone = #{phone}, realname_verified = 1, updated_at = NOW() WHERE id = #{id}")
+    int updatePhone(@Param("id") Long id, @Param("phone") String phone);
 }

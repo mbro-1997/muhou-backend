@@ -54,6 +54,9 @@ public interface PropMapper {
     @Select("SELECT * FROM prop_info WHERE id = #{id}")
     PropEntity selectById(@Param("id") Long id);
 
+    @Select("SELECT * FROM prop_info WHERE qr_code_id = #{qrCodeId}")
+    PropEntity selectByQrCodeId(@Param("qrCodeId") String qrCodeId);
+
     @Select("SELECT * FROM prop_info WHERE supplier_user_id IS NULL AND fill_status = 'pending_fill' ORDER BY created_at DESC, id DESC")
     List<PropEntity> selectPendingFillList();
 
@@ -89,4 +92,10 @@ public interface PropMapper {
 
     @Update("UPDATE prop_info SET audit_status = #{auditStatus}, prop_status = #{propStatus}, updated_at = NOW() WHERE id = #{id}")
     int updateAuditResult(@Param("id") Long id, @Param("auditStatus") String auditStatus, @Param("propStatus") String propStatus);
+
+    @Update("UPDATE prop_info SET qr_code_url = #{qrCodeUrl}, updated_at = NOW() WHERE id = #{id}")
+    int updateQrCodeUrl(@Param("id") Long id, @Param("qrCodeUrl") String qrCodeUrl);
+
+    @Update("UPDATE prop_info SET fill_status = 'revoked', prop_status = 'offline', remark = #{remark}, updated_at = NOW() WHERE id = #{id} AND fill_status = 'pending_fill'")
+    int revokePendingFill(@Param("id") Long id, @Param("remark") String remark);
 }

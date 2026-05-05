@@ -156,6 +156,11 @@ public class AdminController {
         return ApiResponse.success(propApplicationService.listAdminQrCodeProps());
     }
 
+    @PostMapping("/props/qr-codes/{propId}/revoke")
+    public ApiResponse<List<PropResponse>> revokeQrCode(@PathVariable Long propId) {
+        return ApiResponse.success(propApplicationService.revokePendingQrCode(propId));
+    }
+
     @PostMapping("/users/{id}/roles")
     public ApiResponse<List<AdminUserResponse>> bindUserRole(@PathVariable Long id,
                                                              @Valid @RequestBody AdminBindRoleRequest request) {

@@ -28,6 +28,7 @@ public class PropResponse {
     private String auditStatusText;
     private String qrCodeId;
     private String qrCodeUrl;
+    private String qrStatus;
     private String fillStatus;
 
     public Long getId() { return id; }
@@ -76,6 +77,8 @@ public class PropResponse {
     public void setQrCodeId(String qrCodeId) { this.qrCodeId = qrCodeId; }
     public String getQrCodeUrl() { return qrCodeUrl; }
     public void setQrCodeUrl(String qrCodeUrl) { this.qrCodeUrl = qrCodeUrl; }
+    public String getQrStatus() { return qrStatus; }
+    public void setQrStatus(String qrStatus) { this.qrStatus = qrStatus; }
     public String getFillStatus() { return fillStatus; }
     public void setFillStatus(String fillStatus) { this.fillStatus = fillStatus; }
 }
