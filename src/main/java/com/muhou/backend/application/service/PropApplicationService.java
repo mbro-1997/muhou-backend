@@ -98,10 +98,7 @@ public class PropApplicationService {
 
     public List<PropResponse> listPendingFillProps() {
         currentSupplierUserId();
-        return propMapper.selectPendingFillList()
-            .stream()
-            .map(this::toResponse)
-            .collect(Collectors.toList());
+        return List.of();
     }
 
     public List<PropResponse> listAdminPendingFillProps() {
@@ -179,6 +176,23 @@ public class PropApplicationService {
         if (existing.getSupplierUserId() != null) {
             throw new BizException(ResultCode.CONFLICT, "该道具已绑定工厂，不可重复录入");
         }
+        String requestQrCodeId = request.getQrCodeId() == null ? "" : request.getQrCodeId().trim();
+        if (requestQrCodeId.isBlank()) {
+            throw new BizException(ResultCode.VALIDATION_ERROR, "请通过扫码入口录入道具");
+        }
+        if (!requestQrCodeId.equals(existing.getQrCodeId())) {
+            throw new BizException(ResultCode.FORBIDDEN, "扫码二维码与当前录入道具不匹配，不能提交");
+        }
+        PropQrCodeEntity qrCode = propQrCodeMapper.selectByQrCodeId(requestQrCodeId);
+        if (qrCode == null || "revoked".equals(qrCode.getStatus())) {
+            throw new BizException(ResultCode.NOT_FOUND, "二维码不存在或已作废");
+        }
+        if (!propId.equals(qrCode.getPropId())) {
+            throw new BizException(ResultCode.FORBIDDEN, "二维码绑定的道具与当前表单不一致");
+        }
+        if (!"unused".equals(qrCode.getStatus())) {
+            throw new BizException(ResultCode.CONFLICT, "该二维码已登记或已作废，不能重复录入");
+        }
 
         Long supplierUserId = currentSupplierUserId();
         PropEntity entity = buildFilledEntity(existing, request);
@@ -240,6 +254,8 @@ public class PropApplicationService {
         response.setQrCodeUrl(entity.getQrCodeUrl());
         response.setQrStatus(resolveQrStatus(entity));
         response.setFillStatus(entity.getFillStatus());
+        response.setSupplierUserId(entity.getSupplierUserId());
+        response.setSupplierName(entity.getSupplierUserId() == null ? "未绑定工厂" : "工厂 " + entity.getSupplierUserId());
         return response;
     }
 

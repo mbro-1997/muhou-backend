@@ -10,11 +10,13 @@ import com.muhou.backend.infrastructure.persistence.entity.AdminReviewEntity;
 import com.muhou.backend.infrastructure.persistence.entity.DisputeEntity;
 import com.muhou.backend.infrastructure.persistence.entity.PropAuditEntity;
 import com.muhou.backend.infrastructure.persistence.entity.PropImageEntity;
+import com.muhou.backend.infrastructure.persistence.entity.RentalOrderEntity;
 import com.muhou.backend.infrastructure.persistence.mapper.DisputeMapper;
 import com.muhou.backend.infrastructure.persistence.mapper.OrderReviewMapper;
 import com.muhou.backend.infrastructure.persistence.mapper.PropAuditMapper;
 import com.muhou.backend.infrastructure.persistence.mapper.PropImageMapper;
 import com.muhou.backend.infrastructure.persistence.mapper.PropMapper;
+import com.muhou.backend.infrastructure.persistence.mapper.RentalOrderMapper;
 import com.muhou.backend.infrastructure.persistence.mapper.UserRoleMapper;
 import com.muhou.backend.web.response.AdminOverviewResponse;
 import com.muhou.backend.web.response.AdminReviewResponse;
@@ -28,6 +30,7 @@ import com.muhou.backend.web.response.PropAuditResponse;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -39,29 +42,35 @@ public class AdminApplicationService {
     private final OrderReviewMapper orderReviewMapper;
     private final PropMapper propMapper;
     private final PropImageMapper propImageMapper;
+    private final RentalOrderMapper rentalOrderMapper;
     private final UserApplicationService userApplicationService;
     private final CurrentUserSupport currentUserSupport;
     private final FactoryOnboardingApplicationService factoryOnboardingApplicationService;
     private final UserRoleMapper userRoleMapper;
+    private final OrderSettlementApplicationService orderSettlementApplicationService;
 
     public AdminApplicationService(PropAuditMapper propAuditMapper,
                                    DisputeMapper disputeMapper,
                                    OrderReviewMapper orderReviewMapper,
                                    PropMapper propMapper,
                                    PropImageMapper propImageMapper,
+                                   RentalOrderMapper rentalOrderMapper,
                                    UserApplicationService userApplicationService,
                                    CurrentUserSupport currentUserSupport,
                                    FactoryOnboardingApplicationService factoryOnboardingApplicationService,
-                                   UserRoleMapper userRoleMapper) {
+                                   UserRoleMapper userRoleMapper,
+                                   OrderSettlementApplicationService orderSettlementApplicationService) {
         this.propAuditMapper = propAuditMapper;
         this.disputeMapper = disputeMapper;
         this.orderReviewMapper = orderReviewMapper;
         this.propMapper = propMapper;
         this.propImageMapper = propImageMapper;
+        this.rentalOrderMapper = rentalOrderMapper;
         this.userApplicationService = userApplicationService;
         this.currentUserSupport = currentUserSupport;
         this.factoryOnboardingApplicationService = factoryOnboardingApplicationService;
         this.userRoleMapper = userRoleMapper;
+        this.orderSettlementApplicationService = orderSettlementApplicationService;
     }
 
     public AdminOverviewResponse getOverview() {
@@ -159,17 +168,49 @@ public class AdminApplicationService {
             .collect(Collectors.toList());
     }
 
-    @Transactional
-    public List<DisputeResponse> resolveDispute(Long id, String resolution) {
+    public DisputeResponse getDisputeDetail(Long id) {
         requireAdminRole();
         DisputeEntity entity = disputeMapper.selectById(id);
         if (entity == null) {
             throw new BizException(ResultCode.NOT_FOUND, "未找到纠纷记录");
         }
+        return toDisputeResponse(entity);
+    }
+
+    public List<DisputeResponse> listMyDisputes() {
+        Long userId = currentUserSupport.requireCurrentUserId();
+        String role = currentUserSupport.getCurrentRole();
+        if (!List.of("demander", "supplier", "admin").contains(role)) {
+            throw new BizException(ResultCode.FORBIDDEN, "当前角色无权查看仲裁记录");
+        }
+        return disputeMapper.selectByParticipantUserId(userId).stream()
+            .map(this::toDisputeResponse)
+            .collect(Collectors.toList());
+    }
+
+    @Transactional
+    public List<DisputeResponse> resolveDispute(Long id, boolean approved, String resolution) {
+        requireAdminRole();
+        DisputeEntity entity = disputeMapper.selectById(id);
+        if (entity == null) {
+            throw new BizException(ResultCode.NOT_FOUND, "未找到纠纷记录");
+        }
+        if (!"pending".equals(entity.getDisputeStatus())) {
+            throw new BizException(ResultCode.CONFLICT, "当前仲裁已处理，不能重复裁定");
+        }
         String finalResolution = resolution == null || resolution.isBlank()
-            ? "管理员裁定：双方各承担一半责任。"
-            : resolution;
-        disputeMapper.resolve(id, finalResolution, userApplicationService.resolveAdminUserId());
+            ? "管理员裁定：按平台规则处理押金与赔付。"
+            : resolution.trim();
+        String status = approved ? "resolved" : "closed";
+        String resolutionType = approved ? "approved" : "rejected";
+        String refundStatus = approved ? "refund_reserved" : "none";
+        int updated = disputeMapper.resolve(id, status, finalResolution, resolutionType, refundStatus, userApplicationService.resolveAdminUserId());
+        if (updated <= 0) {
+            throw new BizException(ResultCode.CONFLICT, "当前仲裁状态已变化，请刷新后重试");
+        }
+        rentalOrderMapper.markReviewed(entity.getOrderId(), java.time.LocalDateTime.now());
+        RentalOrderEntity order = rentalOrderMapper.selectById(entity.getOrderId());
+        orderSettlementApplicationService.settleDisputeOrder(order, entity, approved);
         return listDisputes();
     }
 
@@ -256,14 +297,28 @@ public class AdminApplicationService {
         DisputeResponse response = new DisputeResponse();
         response.setId(entity.getId());
         response.setOrderId(entity.getOrderId());
+        response.setOrderNo(entity.getOrderNo());
         response.setTitle(entity.getTitle());
         response.setContent(entity.getContent());
         response.setApplicant(entity.getApplicantName());
+        response.setApplicantRole(entity.getApplicantRole());
+        response.setApplicantRoleText("supplier".equals(entity.getApplicantRole()) ? "工厂方" : "租赁方");
+        response.setApplyStage(entity.getApplyStage());
+        response.setApplyStageText(disputeStageText(entity.getApplyStage()));
+        response.setClaimAmount(MoneyUtils.fenToYuan(entity.getClaimAmountFen()));
+        response.setDepositAmount(MoneyUtils.fenToYuan(entity.getDepositAmountFenSnapshot()));
+        response.setEvidenceUrls(entity.getEvidenceUrls());
+        response.setEvidenceImages(parseImages(entity.getEvidenceUrls()).stream()
+            .filter(item -> !"/images/stage-prop-real.jpg".equals(item))
+            .toList());
         response.setStatus(entity.getDisputeStatus());
         response.setStatusText(disputeStatusText(entity.getDisputeStatus()));
         response.setCreatedAt(TimeUtils.format(entity.getCreatedAt()));
         response.setResolvedAt(TimeUtils.format(entity.getResolvedAt()));
         response.setResolution(entity.getResolution());
+        response.setResolutionType(entity.getResolutionType());
+        response.setResolutionTypeText(resolutionTypeText(entity.getResolutionType()));
+        response.setRefundStatus(entity.getRefundStatus());
         return response;
     }
 
@@ -297,12 +352,35 @@ public class AdminApplicationService {
 
     private String disputeStatusText(String status) {
         if ("resolved".equals(status)) {
-            return "已裁定";
+            return "已同意";
         }
         if ("closed".equals(status)) {
-            return "已关闭";
+            return "已拒绝";
         }
-        return "待处理";
+        return "待仲裁";
+    }
+
+    private String resolutionTypeText(String type) {
+        if ("approved".equals(type)) {
+            return "同意仲裁";
+        }
+        if ("rejected".equals(type)) {
+            return "拒绝仲裁";
+        }
+        return "";
+    }
+
+    private String disputeStageText(String stage) {
+        if ("wait_pickup".equals(stage)) {
+            return "待取货";
+        }
+        if ("renting".equals(stage)) {
+            return "租赁中";
+        }
+        if ("wait_review".equals(stage)) {
+            return "待评价";
+        }
+        return "未知节点";
     }
 
     private String propActionText(String action) {
@@ -327,7 +405,7 @@ public class AdminApplicationService {
         if (imageUrl == null || imageUrl.isBlank()) {
             return List.of("/images/stage-prop-real.jpg");
         }
-        return java.util.Arrays.stream(imageUrl.split("[,;\\n]"))
+        return Arrays.stream(imageUrl.split("[,;\\n]"))
             .map(String::trim)
             .filter(item -> !item.isBlank())
             .distinct()

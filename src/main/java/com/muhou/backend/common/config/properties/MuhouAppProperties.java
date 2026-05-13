@@ -30,6 +30,7 @@ public class MuhouAppProperties {
         private boolean demoLoginEnabled = true;
         private boolean allowProfileRoleFallback = false;
         private String tokenSecret = "muhou-dev-token-secret";
+        private long tokenTtlMs = 604800000L;
 
         public boolean isDemoLoginEnabled() {
             return demoLoginEnabled;
@@ -53,6 +54,14 @@ public class MuhouAppProperties {
 
         public void setTokenSecret(String tokenSecret) {
             this.tokenSecret = tokenSecret;
+        }
+
+        public long getTokenTtlMs() {
+            return tokenTtlMs;
+        }
+
+        public void setTokenTtlMs(long tokenTtlMs) {
+            this.tokenTtlMs = tokenTtlMs;
         }
     }
 
@@ -135,6 +144,7 @@ public class MuhouAppProperties {
         private boolean mockEnabled = true;
         private String appId;
         private String appSecret;
+        private String qrEnvVersion = "release";
 
         public boolean isMockEnabled() {
             return mockEnabled;
@@ -158,6 +168,14 @@ public class MuhouAppProperties {
 
         public void setAppSecret(String appSecret) {
             this.appSecret = appSecret;
+        }
+
+        public String getQrEnvVersion() {
+            return qrEnvVersion;
+        }
+
+        public void setQrEnvVersion(String qrEnvVersion) {
+            this.qrEnvVersion = qrEnvVersion;
         }
     }
 

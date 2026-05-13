@@ -1,0 +1,65 @@
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: muhou-mysql
+    restart: unless-stopped
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --default-time-zone=+08:00
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      TZ: Asia/Shanghai
+    volumes:
+      - ./mysql/data:/var/lib/mysql
+      - ./mysql/backup:/backup
+    networks:
+      - muhou-net
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u$$MYSQL_USER -p$$MYSQL_PASSWORD --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  backend:
+    image: muhou-backend:1.0.1
+    container_name: muhou-backend
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    env_file:
+      - ./.env
+    environment:
+      MYSQL_HOST: mysql
+      MYSQL_PORT: 3306
+    networks:
+      - muhou-net
+    expose:
+      - "8078"
+    volumes:
+      - ./logs/backend:/app/logs
+      - ./uploads:/app/uploads
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: muhou-nginx
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - ./nginx/certs:/etc/nginx/certs:ro
+      - ./logs/nginx:/var/log/nginx
+    networks:
+      - muhou-net
+
+networks:
+  muhou-net:
+    driver: bridge

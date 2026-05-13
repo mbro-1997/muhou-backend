@@ -43,7 +43,7 @@ public class WechatMiniappCodeGatewayImpl implements WechatMiniappCodeGateway {
                 "scene", scene,
                 "page", page,
                 "check_path", false,
-                "env_version", "release"
+                "env_version", normalizeEnvVersion(properties.getWechat().getQrEnvVersion())
             ));
             HttpRequest request = HttpRequest.newBuilder(URI.create(url))
                 .header("Content-Type", "application/json")
@@ -130,6 +130,13 @@ public class WechatMiniappCodeGatewayImpl implements WechatMiniappCodeGateway {
 
     private String encode(String value) {
         return URLEncoder.encode(value, StandardCharsets.UTF_8);
+    }
+
+    private String normalizeEnvVersion(String value) {
+        if ("develop".equals(value) || "trial".equals(value) || "release".equals(value)) {
+            return value;
+        }
+        return "release";
     }
 
     private boolean blank(String value) {

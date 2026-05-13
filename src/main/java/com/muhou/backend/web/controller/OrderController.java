@@ -1,14 +1,17 @@
 package com.muhou.backend.web.controller;
 
 import com.muhou.backend.application.service.OrderApplicationService;
+import com.muhou.backend.application.service.AdminApplicationService;
 import com.muhou.backend.common.api.ApiResponse;
 import com.muhou.backend.web.request.CreateOrderRequest;
 import com.muhou.backend.web.request.FactoryRejectOrderRequest;
+import com.muhou.backend.web.request.OrderDisputeRequest;
 import com.muhou.backend.web.request.OrderPayRequest;
 import com.muhou.backend.web.request.OrderReviewRequest;
 import com.muhou.backend.web.request.ScanOrderItemRequest;
 import com.muhou.backend.web.response.OrderResponse;
 import com.muhou.backend.web.response.PayResponse;
+import com.muhou.backend.web.response.DisputeResponse;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -25,9 +28,12 @@ import java.util.List;
 public class OrderController {
 
     private final OrderApplicationService orderApplicationService;
+    private final AdminApplicationService adminApplicationService;
 
-    public OrderController(OrderApplicationService orderApplicationService) {
+    public OrderController(OrderApplicationService orderApplicationService,
+                           AdminApplicationService adminApplicationService) {
         this.orderApplicationService = orderApplicationService;
+        this.adminApplicationService = adminApplicationService;
     }
 
     @GetMapping("/orders")
@@ -43,6 +49,11 @@ public class OrderController {
     @PostMapping("/orders")
     public ApiResponse<OrderResponse> create(@Valid @RequestBody CreateOrderRequest request) {
         return ApiResponse.success(orderApplicationService.createOrder(request));
+    }
+
+    @PostMapping("/orders/checkout")
+    public ApiResponse<PayResponse> checkout(@Valid @RequestBody CreateOrderRequest request) {
+        return ApiResponse.success(orderApplicationService.checkoutProjectOrders(request));
     }
 
     @PostMapping("/orders/{orderId}/pay")
@@ -67,6 +78,9 @@ public class OrderController {
 
     @PostMapping("/factory/orders/{orderId}/outbound-scan")
     public ApiResponse<OrderResponse> outboundByBody(@PathVariable Long orderId, @Valid @RequestBody ScanOrderItemRequest request) {
+        if (request.getQrCodeId() != null && !request.getQrCodeId().isBlank()) {
+            return ApiResponse.success(orderApplicationService.scanOutboundByQrCode(orderId, request.getQrCodeId()));
+        }
         return ApiResponse.success(orderApplicationService.scanOutbound(orderId, request.getPropId()));
     }
 
@@ -77,11 +91,24 @@ public class OrderController {
 
     @PostMapping("/factory/orders/{orderId}/return-scan")
     public ApiResponse<OrderResponse> returnScanByBody(@PathVariable Long orderId, @Valid @RequestBody ScanOrderItemRequest request) {
+        if (request.getQrCodeId() != null && !request.getQrCodeId().isBlank()) {
+            return ApiResponse.success(orderApplicationService.scanReturnByQrCode(orderId, request.getQrCodeId()));
+        }
         return ApiResponse.success(orderApplicationService.scanReturn(orderId, request.getPropId()));
     }
 
     @PostMapping("/orders/{orderId}/reviews")
     public ApiResponse<OrderResponse> review(@PathVariable Long orderId, @Valid @RequestBody OrderReviewRequest request) {
         return ApiResponse.success(orderApplicationService.reviewOrder(orderId, request));
+    }
+
+    @PostMapping("/orders/{orderId}/disputes")
+    public ApiResponse<OrderResponse> applyDispute(@PathVariable Long orderId, @Valid @RequestBody OrderDisputeRequest request) {
+        return ApiResponse.success(orderApplicationService.applyDispute(orderId, request));
+    }
+
+    @GetMapping("/orders/disputes")
+    public ApiResponse<List<DisputeResponse>> myDisputes() {
+        return ApiResponse.success(adminApplicationService.listMyDisputes());
     }
 }

@@ -32,6 +32,7 @@ public class CreatePropRequest {
     private String weight;
     @NotBlank(message = "transportSuggestion is required")
     private String transportSuggestion;
+    private String qrCodeId;
     @NotBlank(message = "style is required")
     public String getStyle() { return style; }
     public void setStyle(String style) { this.style = style; }
@@ -66,4 +67,6 @@ public class CreatePropRequest {
     public void setWeight(String weight) { this.weight = weight; }
     public String getTransportSuggestion() { return transportSuggestion; }
     public void setTransportSuggestion(String transportSuggestion) { this.transportSuggestion = transportSuggestion; }
+    public String getQrCodeId() { return qrCodeId; }
+    public void setQrCodeId(String qrCodeId) { this.qrCodeId = qrCodeId; }
 }

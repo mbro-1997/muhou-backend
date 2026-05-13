@@ -1,0 +1,35 @@
+# Rename this file to muhou.conf and replace api.example.com with your real domain.
+
+server {
+    listen 80;
+    server_name api.example.com;
+
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name api.example.com;
+
+    ssl_certificate     /etc/nginx/certs/api.example.com.pem;
+    ssl_certificate_key /etc/nginx/certs/api.example.com.key;
+
+    client_max_body_size 20m;
+
+    location /api/ {
+        proxy_pass http://backend:8078/api/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_connect_timeout 30s;
+        proxy_read_timeout 60s;
+    }
+
+    location /actuator/health {
+        proxy_pass http://backend:8078/actuator/health;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto https;
+    }
+}

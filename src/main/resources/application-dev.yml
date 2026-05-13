@@ -13,4 +13,5 @@ muhou:
     token-secret: muhou-dev-token-secret
   wechat:
     app-id: ${WECHAT_MINIAPP_APP_ID:wxaf7914ed6be3ebdb}
-    app-secret: ${WECHAT_MINIAPP_APP_SECRET:c48a8882138bcc84323ffb477a3bd2ce}
+    app-secret: ${WECHAT_MINIAPP_APP_SECRET:}
+    qr-env-version: trial

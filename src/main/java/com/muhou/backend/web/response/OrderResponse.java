@@ -11,6 +11,11 @@ public class OrderResponse {
     private String status;
     private String statusText;
     private String payStatus;
+    private Long supplierUserId;
+    private String supplierName;
+    private Long paymentId;
+    private String paymentNo;
+    private String sourceProjectName;
     private Integer rentalDays;
     private String rentalStartDate;
     private String rentalEndDate;
@@ -35,6 +40,8 @@ public class OrderResponse {
     private boolean canScanOutbound;
     private boolean canScanReturn;
     private boolean canReview;
+    private boolean canApplyDispute;
+    private int disputeCount;
     private boolean demanderReviewed;
     private boolean supplierReviewed;
     private Long confirmDeadlineAt;
@@ -44,6 +51,7 @@ public class OrderResponse {
     private Long pickedUpAt;
     private Long returnedAt;
     private Long reviewedAt;
+    private List<DisputeResponse> disputes;
 
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
@@ -57,6 +65,16 @@ public class OrderResponse {
     public void setStatusText(String statusText) { this.statusText = statusText; }
     public String getPayStatus() { return payStatus; }
     public void setPayStatus(String payStatus) { this.payStatus = payStatus; }
+    public Long getSupplierUserId() { return supplierUserId; }
+    public void setSupplierUserId(Long supplierUserId) { this.supplierUserId = supplierUserId; }
+    public String getSupplierName() { return supplierName; }
+    public void setSupplierName(String supplierName) { this.supplierName = supplierName; }
+    public Long getPaymentId() { return paymentId; }
+    public void setPaymentId(Long paymentId) { this.paymentId = paymentId; }
+    public String getPaymentNo() { return paymentNo; }
+    public void setPaymentNo(String paymentNo) { this.paymentNo = paymentNo; }
+    public String getSourceProjectName() { return sourceProjectName; }
+    public void setSourceProjectName(String sourceProjectName) { this.sourceProjectName = sourceProjectName; }
     public Integer getRentalDays() { return rentalDays; }
     public void setRentalDays(Integer rentalDays) { this.rentalDays = rentalDays; }
     public String getRentalStartDate() { return rentalStartDate; }
@@ -105,6 +123,10 @@ public class OrderResponse {
     public void setCanScanReturn(boolean canScanReturn) { this.canScanReturn = canScanReturn; }
     public boolean isCanReview() { return canReview; }
     public void setCanReview(boolean canReview) { this.canReview = canReview; }
+    public boolean isCanApplyDispute() { return canApplyDispute; }
+    public void setCanApplyDispute(boolean canApplyDispute) { this.canApplyDispute = canApplyDispute; }
+    public int getDisputeCount() { return disputeCount; }
+    public void setDisputeCount(int disputeCount) { this.disputeCount = disputeCount; }
     public boolean isDemanderReviewed() { return demanderReviewed; }
     public void setDemanderReviewed(boolean demanderReviewed) { this.demanderReviewed = demanderReviewed; }
     public boolean isSupplierReviewed() { return supplierReviewed; }
@@ -123,4 +145,6 @@ public class OrderResponse {
     public void setReturnedAt(Long returnedAt) { this.returnedAt = returnedAt; }
     public Long getReviewedAt() { return reviewedAt; }
     public void setReviewedAt(Long reviewedAt) { this.reviewedAt = reviewedAt; }
+    public List<DisputeResponse> getDisputes() { return disputes; }
+    public void setDisputes(List<DisputeResponse> disputes) { this.disputes = disputes; }
 }

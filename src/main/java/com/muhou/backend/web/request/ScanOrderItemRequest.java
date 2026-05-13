@@ -1,11 +1,9 @@
 package com.muhou.backend.web.request;
 
-import jakarta.validation.constraints.NotNull;
-
 public class ScanOrderItemRequest {
 
-    @NotNull(message = "propId is required")
     private Long propId;
+    private String qrCodeId;
 
     public Long getPropId() {
         return propId;
@@ -13,5 +11,13 @@ public class ScanOrderItemRequest {
 
     public void setPropId(Long propId) {
         this.propId = propId;
+    }
+
+    public String getQrCodeId() {
+        return qrCodeId;
+    }
+
+    public void setQrCodeId(String qrCodeId) {
+        this.qrCodeId = qrCodeId;
     }
 }

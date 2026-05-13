@@ -17,6 +17,7 @@ public class UserProfileResponse {
     private String factoryAuditRejectReason;
     private boolean realnameVerified;
     private boolean studentVerified;
+    private Integer creditScore;
 
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
@@ -44,4 +45,6 @@ public class UserProfileResponse {
     public void setRealnameVerified(boolean realnameVerified) { this.realnameVerified = realnameVerified; }
     public boolean isStudentVerified() { return studentVerified; }
     public void setStudentVerified(boolean studentVerified) { this.studentVerified = studentVerified; }
+    public Integer getCreditScore() { return creditScore; }
+    public void setCreditScore(Integer creditScore) { this.creditScore = creditScore; }
 }

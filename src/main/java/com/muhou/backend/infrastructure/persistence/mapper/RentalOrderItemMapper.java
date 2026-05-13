@@ -30,6 +30,9 @@ public interface RentalOrderItemMapper {
     @Select("SELECT * FROM rental_order_item WHERE order_id = #{orderId} ORDER BY id ASC")
     List<RentalOrderItemEntity> selectByOrderId(@Param("orderId") Long orderId);
 
+    @Select("SELECT * FROM rental_order_item WHERE order_id = #{orderId} AND prop_id = #{propId} LIMIT 1")
+    RentalOrderItemEntity selectByOrderIdAndPropId(@Param("orderId") Long orderId, @Param("propId") Long propId);
+
     @Update("UPDATE rental_order_item SET outbound_status = 'scanned', outbound_scanned_at = #{scannedAt} WHERE order_id = #{orderId} AND prop_id = #{propId}")
     int markOutboundScanned(@Param("orderId") Long orderId, @Param("propId") Long propId, @Param("scannedAt") LocalDateTime scannedAt);
 

@@ -6,11 +6,14 @@ import com.muhou.backend.common.support.CurrentUserSession;
 import com.muhou.backend.common.support.CurrentUserSupport;
 import com.muhou.backend.infrastructure.client.WechatPhoneGateway;
 import com.muhou.backend.infrastructure.client.WechatPhoneNumberResult;
+import com.muhou.backend.infrastructure.persistence.entity.UserCreditLogEntity;
 import com.muhou.backend.infrastructure.persistence.entity.UserEntity;
+import com.muhou.backend.infrastructure.persistence.mapper.UserCreditLogMapper;
 import com.muhou.backend.infrastructure.persistence.mapper.UserMapper;
 import com.muhou.backend.infrastructure.persistence.mapper.UserRoleMapper;
 import com.muhou.backend.web.request.UserProfileUpdateRequest;
 import com.muhou.backend.web.response.AdminUserResponse;
+import com.muhou.backend.web.response.UserCreditLogResponse;
 import com.muhou.backend.web.response.UserProfileResponse;
 import org.springframework.stereotype.Service;
 
@@ -21,17 +24,20 @@ import java.util.stream.Collectors;
 public class UserApplicationService {
 
     private final UserMapper userMapper;
+    private final UserCreditLogMapper userCreditLogMapper;
     private final UserRoleMapper userRoleMapper;
     private final CurrentUserSupport currentUserSupport;
     private final FactoryOnboardingApplicationService factoryOnboardingApplicationService;
     private final WechatPhoneGateway wechatPhoneGateway;
 
     public UserApplicationService(UserMapper userMapper,
+                                  UserCreditLogMapper userCreditLogMapper,
                                   UserRoleMapper userRoleMapper,
                                   CurrentUserSupport currentUserSupport,
                                   FactoryOnboardingApplicationService factoryOnboardingApplicationService,
                                   WechatPhoneGateway wechatPhoneGateway) {
         this.userMapper = userMapper;
+        this.userCreditLogMapper = userCreditLogMapper;
         this.userRoleMapper = userRoleMapper;
         this.currentUserSupport = currentUserSupport;
         this.factoryOnboardingApplicationService = factoryOnboardingApplicationService;
@@ -66,7 +72,16 @@ public class UserApplicationService {
         response.setFactoryAuditRejectReason(snapshot.getFactoryAuditRejectReason());
         response.setRealnameVerified(user.getRealnameVerified() != null && user.getRealnameVerified() == 1);
         response.setStudentVerified(user.getStudentVerified() != null && user.getStudentVerified() == 1);
+        response.setCreditScore(user.getCreditScore() == null ? defaultCreditScore(user) : user.getCreditScore());
         return response;
+    }
+
+    public List<UserCreditLogResponse> listCurrentUserCreditLogs() {
+        Long userId = currentUserSupport.requireCurrentUserId();
+        requireUser(userId);
+        return userCreditLogMapper.selectByUserId(userId).stream()
+            .map(this::toCreditLogResponse)
+            .collect(Collectors.toList());
     }
 
     public UserProfileResponse updateCurrentUserProfile(UserProfileUpdateRequest request) {
@@ -163,6 +178,42 @@ public class UserApplicationService {
         response.setStatus(user.getRegisterStatus());
         response.setStatusText(userStatusText(user.getRegisterStatus()));
         return response;
+    }
+
+    private UserCreditLogResponse toCreditLogResponse(UserCreditLogEntity entity) {
+        UserCreditLogResponse response = new UserCreditLogResponse();
+        response.setId(entity.getId());
+        response.setBeforeScore(entity.getBeforeScore());
+        response.setDeltaScore(entity.getDeltaScore());
+        response.setAfterScore(entity.getAfterScore());
+        response.setChangeType(entity.getChangeType());
+        response.setChangeTypeText(creditChangeTypeText(entity.getChangeType()));
+        response.setBizType(entity.getBizType());
+        response.setBizId(entity.getBizId());
+        response.setReason(entity.getReason());
+        response.setCreatedAt(entity.getCreatedAt() == null ? "" : entity.getCreatedAt().toString().replace('T', ' '));
+        return response;
+    }
+
+    private int defaultCreditScore(UserEntity user) {
+        if (user.getStudentVerified() != null && user.getStudentVerified() == 1) {
+            return 98;
+        }
+        if (user.getRealnameVerified() != null && user.getRealnameVerified() == 1) {
+            return 90;
+        }
+        return 80;
+    }
+
+    private String creditChangeTypeText(String type) {
+        return switch (type == null ? "" : type) {
+            case "init" -> "系统初始化";
+            case "order" -> "订单履约";
+            case "review" -> "评价记录";
+            case "dispute" -> "纠纷仲裁";
+            case "manual" -> "人工调整";
+            default -> "信用变动";
+        };
     }
 
     private String normalizeRole(String role) {

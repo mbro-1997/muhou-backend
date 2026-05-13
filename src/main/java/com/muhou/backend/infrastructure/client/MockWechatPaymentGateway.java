@@ -26,4 +26,30 @@ public class MockWechatPaymentGateway implements WechatPaymentGateway {
             true
         );
     }
+
+    @Override
+    public WechatFundResult refundToUser(String outRefundNo, Long orderId, Long receiverUserId, int amountFen, String reason) {
+        if (!properties.getPayment().isMockEnabled()) {
+            throw new IllegalStateException("Real WeChat refund is not wired yet. Switch muhou.payment.mock-enabled=true for local development.");
+        }
+        return new WechatFundResult(
+            outRefundNo,
+            "mock-refund-" + outRefundNo,
+            "{\"mock\":true,\"action\":\"refund\",\"outRefundNo\":\"" + outRefundNo + "\",\"amountFen\":" + amountFen + "}",
+            true
+        );
+    }
+
+    @Override
+    public WechatFundResult profitShareToReceiver(String outOrderNo, Long orderId, Long receiverUserId, String receiverRole, int amountFen, String description) {
+        if (!properties.getPayment().isMockEnabled()) {
+            throw new IllegalStateException("Real WeChat profit sharing is not wired yet. Switch muhou.payment.mock-enabled=true for local development.");
+        }
+        return new WechatFundResult(
+            outOrderNo,
+            "mock-profit-sharing-" + outOrderNo,
+            "{\"mock\":true,\"action\":\"profit_sharing\",\"outOrderNo\":\"" + outOrderNo + "\",\"receiverRole\":\"" + receiverRole + "\",\"amountFen\":" + amountFen + "}",
+            true
+        );
+    }
 }

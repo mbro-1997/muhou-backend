@@ -31,3 +31,7 @@ build/
 
 ### VS Code ###
 .vscode/
+
+### Runtime uploads and packaged images ###
+uploads/
+*.tar

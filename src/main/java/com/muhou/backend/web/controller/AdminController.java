@@ -5,6 +5,7 @@ import com.muhou.backend.application.service.PropApplicationService;
 import com.muhou.backend.common.api.ApiResponse;
 import com.muhou.backend.web.request.AdminAuditDecisionRequest;
 import com.muhou.backend.web.request.AdminBindRoleRequest;
+import com.muhou.backend.web.request.AdminDisputeDecisionRequest;
 import com.muhou.backend.web.request.AdminDisputeResolveRequest;
 import com.muhou.backend.web.request.FactoryInviteCreateRequest;
 import com.muhou.backend.web.response.AdminOverviewResponse;
@@ -114,11 +115,22 @@ public class AdminController {
         return ApiResponse.success(adminApplicationService.listDisputes());
     }
 
+    @GetMapping("/disputes/{id}")
+    public ApiResponse<DisputeResponse> disputeDetail(@PathVariable Long id) {
+        return ApiResponse.success(adminApplicationService.getDisputeDetail(id));
+    }
+
+    @PostMapping("/disputes/{id}/decision")
+    public ApiResponse<List<DisputeResponse>> decideDispute(@PathVariable Long id,
+                                                            @Valid @RequestBody AdminDisputeDecisionRequest request) {
+        return ApiResponse.success(adminApplicationService.resolveDispute(id, Boolean.TRUE.equals(request.getApproved()), request.getReason()));
+    }
+
     @PostMapping("/disputes/{id}/resolve")
     public ApiResponse<List<DisputeResponse>> resolveDispute(@PathVariable Long id,
                                                              @RequestBody(required = false) AdminDisputeResolveRequest request) {
         String resolution = request == null ? null : request.getResolution();
-        return ApiResponse.success(adminApplicationService.resolveDispute(id, resolution));
+        return ApiResponse.success(adminApplicationService.resolveDispute(id, true, resolution));
     }
 
     @GetMapping("/reviews")

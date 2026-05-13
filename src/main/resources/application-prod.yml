@@ -1,8 +1,45 @@
+server:
+  port: ${SERVER_PORT:8078}
+
 spring:
   datasource:
-    url: ${MUHOU_DB_URL:jdbc:mysql://127.0.0.1:3306/muhou?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true}
-    username: ${MUHOU_DB_USERNAME:root}
-    password: ${MUHOU_DB_PASSWORD:1234}
+    url: jdbc:mysql://${MYSQL_HOST:mysql}:${MYSQL_PORT:3306}/${MYSQL_DATABASE:muhou}?useUnicode=true&characterEncoding=utf8&serverTimezone=Asia/Shanghai&useSSL=false&allowPublicKeyRetrieval=true
+    username: ${MYSQL_USER:muhou}
+    password: ${MYSQL_PASSWORD:change-me}
     driver-class-name: com.mysql.cj.jdbc.Driver
   flyway:
     enabled: true
+  jackson:
+    time-zone: Asia/Shanghai
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+
+muhou:
+  auth:
+    demo-login-enabled: ${MUHOU_AUTH_DEMO_LOGIN_ENABLED:false}
+    allow-profile-role-fallback: false
+    token-secret: ${MUHOU_AUTH_TOKEN_SECRET:change-me-to-a-long-random-secret}
+    token-ttl-ms: ${MUHOU_AUTH_TOKEN_TTL_MS:604800000}
+  wechat:
+    mock-enabled: ${WECHAT_MOCK_ENABLED:false}
+    app-id: ${WECHAT_MINIAPP_APP_ID:}
+    app-secret: ${WECHAT_MINIAPP_APP_SECRET:}
+    qr-env-version: ${WECHAT_QR_ENV_VERSION:trial}
+  payment:
+    mock-enabled: ${WECHAT_PAY_MOCK_ENABLED:true}
+    mch-id: ${WECHAT_PAY_MCH_ID:}
+    app-id: ${WECHAT_PAY_APP_ID:${WECHAT_MINIAPP_APP_ID:}}
+    private-key-path: ${WECHAT_PAY_PRIVATE_KEY_PATH:}
+    merchant-serial-no: ${WECHAT_PAY_MERCHANT_SERIAL_NO:}
+    api-v3-key: ${WECHAT_PAY_API_V3_KEY:}
+    notify-url: ${WECHAT_PAY_NOTIFY_URL:}
+    refund-notify-url: ${WECHAT_PAY_REFUND_NOTIFY_URL:}
+  order:
+    timeout-auto-cancel-enabled: true
+    timeout-cleanup-delay-ms: 60000
+    auto-good-review-enabled: true
+    auto-good-review-delay-ms: 3600000

@@ -3,6 +3,7 @@ package com.muhou.backend.common.support;
 import com.muhou.backend.common.api.ResultCode;
 import com.muhou.backend.common.config.properties.MuhouAppProperties;
 import com.muhou.backend.common.exception.BizException;
+import com.muhou.backend.infrastructure.persistence.mapper.UserRoleMapper;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.stereotype.Component;
 import org.springframework.web.context.request.RequestContextHolder;
@@ -21,9 +22,11 @@ public class CurrentUserSupport {
     private static final String HMAC_ALGORITHM = "HmacSHA256";
 
     private final MuhouAppProperties properties;
+    private final UserRoleMapper userRoleMapper;
 
-    public CurrentUserSupport(MuhouAppProperties properties) {
+    public CurrentUserSupport(MuhouAppProperties properties, UserRoleMapper userRoleMapper) {
         this.properties = properties;
+        this.userRoleMapper = userRoleMapper;
     }
 
     public String generateToken(Long userId, String role) {
@@ -92,6 +95,14 @@ public class CurrentUserSupport {
             }
             Long userId = Long.valueOf(parts[1]);
             String role = parts[2];
+            long issuedAt = Long.parseLong(parts[3]);
+            long tokenTtlMs = properties.getAuth().getTokenTtlMs();
+            if (tokenTtlMs > 0 && System.currentTimeMillis() - issuedAt > tokenTtlMs) {
+                return null;
+            }
+            if (role != null && !role.isBlank() && !userRoleMapper.selectRoleCodesByUserId(userId).contains(role)) {
+                return null;
+            }
             return new CurrentUserSession(userId, role, token);
         } catch (Exception ex) {
             return null;

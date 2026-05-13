@@ -9,6 +9,7 @@ import com.muhou.backend.web.request.UserProfileUpdateRequest;
 import com.muhou.backend.web.request.WechatPhoneBindRequest;
 import com.muhou.backend.web.response.FactoryAuditStatusResponse;
 import com.muhou.backend.web.response.FactoryInviteVerifyResponse;
+import com.muhou.backend.web.response.UserCreditLogResponse;
 import com.muhou.backend.web.response.UserProfileResponse;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -35,6 +36,11 @@ public class UserController {
     @GetMapping("/me")
     public ApiResponse<UserProfileResponse> me(@RequestParam(required = false) String role) {
         return ApiResponse.success(userApplicationService.getCurrentUser(role));
+    }
+
+    @GetMapping("/credit-logs")
+    public ApiResponse<java.util.List<UserCreditLogResponse>> creditLogs() {
+        return ApiResponse.success(userApplicationService.listCurrentUserCreditLogs());
     }
 
     @PostMapping("/bind-demander")

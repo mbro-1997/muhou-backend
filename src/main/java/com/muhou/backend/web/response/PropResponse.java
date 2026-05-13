@@ -30,6 +30,8 @@ public class PropResponse {
     private String qrCodeUrl;
     private String qrStatus;
     private String fillStatus;
+    private Long supplierUserId;
+    private String supplierName;
 
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
@@ -81,4 +83,8 @@ public class PropResponse {
     public void setQrStatus(String qrStatus) { this.qrStatus = qrStatus; }
     public String getFillStatus() { return fillStatus; }
     public void setFillStatus(String fillStatus) { this.fillStatus = fillStatus; }
+    public Long getSupplierUserId() { return supplierUserId; }
+    public void setSupplierUserId(Long supplierUserId) { this.supplierUserId = supplierUserId; }
+    public String getSupplierName() { return supplierName; }
+    public void setSupplierName(String supplierName) { this.supplierName = supplierName; }
 }

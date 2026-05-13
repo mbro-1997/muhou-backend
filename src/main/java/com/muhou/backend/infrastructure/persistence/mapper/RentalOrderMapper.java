@@ -64,6 +64,11 @@ public interface RentalOrderMapper {
     @Update("UPDATE rental_order SET order_status = 'completed', reviewed_at = #{reviewedAt}, deposit_refunded_flag = 1, updated_at = NOW() WHERE id = #{orderId}")
     int markReviewed(@Param("orderId") Long orderId, @Param("reviewedAt") LocalDateTime reviewedAt);
 
+    @Update("UPDATE rental_order SET refund_status = #{refundStatus}, total_refunded_fen = #{totalRefundedFen}, updated_at = NOW() WHERE id = #{orderId}")
+    int updateSettlementSummary(@Param("orderId") Long orderId,
+                                @Param("refundStatus") String refundStatus,
+                                @Param("totalRefundedFen") Integer totalRefundedFen);
+
     @Update("UPDATE rental_order SET order_status = 'cancelled_timeout', cancelled_at = #{cancelledAt}, cancel_reason = #{cancelReason}, updated_at = NOW() WHERE id = #{orderId} AND order_status = 'pending_factory_confirm'")
     int markTimeoutCancelled(@Param("orderId") Long orderId,
                              @Param("cancelledAt") LocalDateTime cancelledAt,
