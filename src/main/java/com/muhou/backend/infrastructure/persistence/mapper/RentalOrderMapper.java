@@ -69,13 +69,19 @@ public interface RentalOrderMapper {
                                 @Param("refundStatus") String refundStatus,
                                 @Param("totalRefundedFen") Integer totalRefundedFen);
 
-    @Update("UPDATE rental_order SET order_status = 'cancelled_timeout', cancelled_at = #{cancelledAt}, cancel_reason = #{cancelReason}, updated_at = NOW() WHERE id = #{orderId} AND order_status = 'pending_factory_confirm'")
+    @Update("UPDATE rental_order SET order_status = 'cancelled_timeout', cancelled_at = #{cancelledAt}, cancel_reason = #{cancelReason}, cancel_type = 'timeout_cancel', updated_at = NOW() WHERE id = #{orderId} AND order_status = 'pending_factory_confirm'")
     int markTimeoutCancelled(@Param("orderId") Long orderId,
                              @Param("cancelledAt") LocalDateTime cancelledAt,
                              @Param("cancelReason") String cancelReason);
 
-    @Update("UPDATE rental_order SET order_status = 'cancelled_manual', cancelled_at = #{cancelledAt}, cancel_reason = #{cancelReason}, updated_at = NOW() WHERE id = #{orderId} AND order_status = 'pending_factory_confirm'")
+    @Update("UPDATE rental_order SET order_status = 'cancelled_manual', cancelled_at = #{cancelledAt}, cancel_reason = #{cancelReason}, cancel_type = 'supplier_reject_before_confirm', updated_at = NOW() WHERE id = #{orderId} AND order_status = 'pending_factory_confirm'")
     int markFactoryRejected(@Param("orderId") Long orderId,
                             @Param("cancelledAt") LocalDateTime cancelledAt,
                             @Param("cancelReason") String cancelReason);
+
+    @Update("UPDATE rental_order SET order_status = 'cancelled_manual', cancelled_at = #{cancelledAt}, cancel_reason = #{cancelReason}, cancel_type = #{cancelType}, updated_at = NOW() WHERE id = #{orderId} AND order_status IN ('pending_factory_confirm', 'wait_pickup')")
+    int markManualCancelled(@Param("orderId") Long orderId,
+                            @Param("cancelledAt") LocalDateTime cancelledAt,
+                            @Param("cancelReason") String cancelReason,
+                            @Param("cancelType") String cancelType);
 }

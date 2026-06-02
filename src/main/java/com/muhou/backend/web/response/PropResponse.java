@@ -32,6 +32,16 @@ public class PropResponse {
     private String fillStatus;
     private Long supplierUserId;
     private String supplierName;
+    private Integer quantity;
+    private Integer totalStock;
+    private Integer availableStock;
+    private Integer lockedStock;
+    private Integer rentedStock;
+    private Integer assetTotalStock;
+    private Integer repairingStock;
+    private Integer lostStock;
+    private Integer scrappedStock;
+    private boolean canRent;
 
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
@@ -87,4 +97,24 @@ public class PropResponse {
     public void setSupplierUserId(Long supplierUserId) { this.supplierUserId = supplierUserId; }
     public String getSupplierName() { return supplierName; }
     public void setSupplierName(String supplierName) { this.supplierName = supplierName; }
+    public Integer getQuantity() { return quantity; }
+    public void setQuantity(Integer quantity) { this.quantity = quantity; }
+    public Integer getTotalStock() { return totalStock; }
+    public void setTotalStock(Integer totalStock) { this.totalStock = totalStock; }
+    public Integer getAvailableStock() { return availableStock; }
+    public void setAvailableStock(Integer availableStock) { this.availableStock = availableStock; }
+    public Integer getLockedStock() { return lockedStock; }
+    public void setLockedStock(Integer lockedStock) { this.lockedStock = lockedStock; }
+    public Integer getRentedStock() { return rentedStock; }
+    public void setRentedStock(Integer rentedStock) { this.rentedStock = rentedStock; }
+    public Integer getAssetTotalStock() { return assetTotalStock; }
+    public void setAssetTotalStock(Integer assetTotalStock) { this.assetTotalStock = assetTotalStock; }
+    public Integer getRepairingStock() { return repairingStock; }
+    public void setRepairingStock(Integer repairingStock) { this.repairingStock = repairingStock; }
+    public Integer getLostStock() { return lostStock; }
+    public void setLostStock(Integer lostStock) { this.lostStock = lostStock; }
+    public Integer getScrappedStock() { return scrappedStock; }
+    public void setScrappedStock(Integer scrappedStock) { this.scrappedStock = scrappedStock; }
+    public boolean isCanRent() { return canRent; }
+    public void setCanRent(boolean canRent) { this.canRent = canRent; }
 }

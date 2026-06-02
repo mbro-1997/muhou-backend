@@ -16,11 +16,11 @@ public interface RentalOrderItemMapper {
     @Insert({
         "<script>",
         "INSERT INTO rental_order_item (",
-        "order_id, prop_id, prop_name_snapshot, image_url_snapshot, daily_rent_price_fen_snapshot, deposit_amount_fen_snapshot, outbound_status, return_status",
+        "order_id, prop_id, quantity, prop_name_snapshot, image_url_snapshot, daily_rent_price_fen_snapshot, deposit_amount_fen_snapshot, outbound_status, return_status",
         ") VALUES ",
         "<foreach collection='items' item='item' separator=','>",
         "(",
-        "#{item.orderId}, #{item.propId}, #{item.propNameSnapshot}, #{item.imageUrlSnapshot}, #{item.dailyRentPriceFenSnapshot}, #{item.depositAmountFenSnapshot}, #{item.outboundStatus}, #{item.returnStatus}",
+        "#{item.orderId}, #{item.propId}, #{item.quantity}, #{item.propNameSnapshot}, #{item.imageUrlSnapshot}, #{item.dailyRentPriceFenSnapshot}, #{item.depositAmountFenSnapshot}, #{item.outboundStatus}, #{item.returnStatus}",
         ")",
         "</foreach>",
         "</script>"

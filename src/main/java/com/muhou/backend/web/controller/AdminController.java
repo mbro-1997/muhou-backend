@@ -1,13 +1,14 @@
 package com.muhou.backend.web.controller;
 
 import com.muhou.backend.application.service.AdminApplicationService;
-import com.muhou.backend.application.service.PropApplicationService;
+import com.muhou.backend.application.service.AdminConsoleApplicationService;
 import com.muhou.backend.common.api.ApiResponse;
 import com.muhou.backend.web.request.AdminAuditDecisionRequest;
 import com.muhou.backend.web.request.AdminBindRoleRequest;
 import com.muhou.backend.web.request.AdminDisputeDecisionRequest;
-import com.muhou.backend.web.request.AdminDisputeResolveRequest;
+import com.muhou.backend.web.request.AdminOrderActionRequest;
 import com.muhou.backend.web.request.FactoryInviteCreateRequest;
+import com.muhou.backend.web.request.PropInstanceStatusUpdateRequest;
 import com.muhou.backend.web.response.AdminOverviewResponse;
 import com.muhou.backend.web.response.AdminReviewResponse;
 import com.muhou.backend.web.response.AdminUserResponse;
@@ -16,6 +17,8 @@ import com.muhou.backend.web.response.FactoryAuditDetailResponse;
 import com.muhou.backend.web.response.FactoryAuditResponse;
 import com.muhou.backend.web.response.FactoryInviteCodeResponse;
 import com.muhou.backend.web.response.FactoryInviteCreateResponse;
+import com.muhou.backend.web.response.PropInstanceResponse;
+import com.muhou.backend.web.response.PropInstanceStatusLogResponse;
 import com.muhou.backend.web.response.PropResponse;
 import com.muhou.backend.web.response.PropAuditResponse;
 import jakarta.validation.Valid;
@@ -25,26 +28,101 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/admin")
 public class AdminController {
 
     private final AdminApplicationService adminApplicationService;
-    private final PropApplicationService propApplicationService;
+    private final AdminConsoleApplicationService adminConsoleApplicationService;
 
     public AdminController(AdminApplicationService adminApplicationService,
-                           PropApplicationService propApplicationService) {
+                           AdminConsoleApplicationService adminConsoleApplicationService) {
         this.adminApplicationService = adminApplicationService;
-        this.propApplicationService = propApplicationService;
+        this.adminConsoleApplicationService = adminConsoleApplicationService;
     }
 
     @GetMapping("/overview")
     public ApiResponse<AdminOverviewResponse> overview() {
         return ApiResponse.success(adminApplicationService.getOverview());
+    }
+
+    @GetMapping("/dashboard")
+    public ApiResponse<Map<String, Object>> dashboard() {
+        return ApiResponse.success(adminConsoleApplicationService.dashboard());
+    }
+
+    @GetMapping("/orders")
+    public ApiResponse<List<Map<String, Object>>> adminOrders(@RequestParam(required = false) String orderNo,
+                                                              @RequestParam(required = false) String demanderKeyword,
+                                                              @RequestParam(required = false) String supplierKeyword,
+                                                              @RequestParam(required = false) String orderStatus,
+                                                              @RequestParam(required = false) String payStatus,
+                                                              @RequestParam(required = false) String refundStatus,
+                                                              @RequestParam(required = false) Boolean hasDispute,
+                                                              @RequestParam(required = false) Boolean hasPendingDispute,
+                                                              @RequestParam(defaultValue = "1") int page,
+                                                              @RequestParam(defaultValue = "20") int pageSize) {
+        return ApiResponse.success(adminConsoleApplicationService.listOrders(orderNo, demanderKeyword, supplierKeyword,
+            orderStatus, payStatus, refundStatus, hasDispute, hasPendingDispute, page, pageSize));
+    }
+
+    @GetMapping("/orders/{orderId}")
+    public ApiResponse<Map<String, Object>> adminOrderDetail(@PathVariable Long orderId) {
+        return ApiResponse.success(adminConsoleApplicationService.getOrderDetail(orderId));
+    }
+
+    @GetMapping("/orders/{orderId}/actions")
+    public ApiResponse<?> adminOrderActions(@PathVariable Long orderId) {
+        return ApiResponse.success(adminConsoleApplicationService.listOrderActions(orderId));
+    }
+
+    @PostMapping("/orders/{orderId}/actions")
+    public ApiResponse<?> addAdminOrderAction(@PathVariable Long orderId,
+                                              @RequestBody AdminOrderActionRequest request) {
+        return ApiResponse.success(adminConsoleApplicationService.addOrderAction(orderId, request));
+    }
+
+    @GetMapping("/fund-flows")
+    public ApiResponse<List<Map<String, Object>>> fundFlows(@RequestParam(required = false) String orderNo,
+                                                            @RequestParam(required = false) String flowType,
+                                                            @RequestParam(required = false) String receiverRole,
+                                                            @RequestParam(required = false) String channelStatus,
+                                                            @RequestParam(defaultValue = "1") int page,
+                                                            @RequestParam(defaultValue = "20") int pageSize) {
+        return ApiResponse.success(adminConsoleApplicationService.listFundFlows(orderNo, flowType, receiverRole, channelStatus, page, pageSize));
+    }
+
+    @GetMapping("/prop-instances")
+    public ApiResponse<List<Map<String, Object>>> propInstances(@RequestParam(required = false) String keyword,
+                                                                @RequestParam(required = false) Long supplierId,
+                                                                @RequestParam(required = false) Long propId,
+                                                                @RequestParam(required = false) String instanceStatus,
+                                                                @RequestParam(required = false) Long currentOrderId,
+                                                                @RequestParam(defaultValue = "1") int page,
+                                                                @RequestParam(defaultValue = "20") int pageSize) {
+        return ApiResponse.success(adminConsoleApplicationService.listPropInstances(keyword, supplierId, propId, instanceStatus, currentOrderId, page, pageSize));
+    }
+
+    @GetMapping("/actions")
+    public ApiResponse<?> actions(@RequestParam(required = false) String orderNo,
+                                  @RequestParam(required = false) String actionType,
+                                  @RequestParam(required = false) Long operatorUserId,
+                                  @RequestParam(required = false) String targetRole,
+                                  @RequestParam(required = false) Long targetUserId,
+                                  @RequestParam(defaultValue = "1") int page,
+                                  @RequestParam(defaultValue = "20") int pageSize) {
+        return ApiResponse.success(adminConsoleApplicationService.listActions(orderNo, actionType, operatorUserId, targetRole, targetUserId, page, pageSize));
+    }
+
+    @GetMapping("/dispute-reasons")
+    public ApiResponse<?> adminDisputeReasons() {
+        return ApiResponse.success(adminConsoleApplicationService.listDisputeReasons(null, null));
     }
 
     @GetMapping("/factory-audits")
@@ -123,14 +201,12 @@ public class AdminController {
     @PostMapping("/disputes/{id}/decision")
     public ApiResponse<List<DisputeResponse>> decideDispute(@PathVariable Long id,
                                                             @Valid @RequestBody AdminDisputeDecisionRequest request) {
-        return ApiResponse.success(adminApplicationService.resolveDispute(id, Boolean.TRUE.equals(request.getApproved()), request.getReason()));
-    }
-
-    @PostMapping("/disputes/{id}/resolve")
-    public ApiResponse<List<DisputeResponse>> resolveDispute(@PathVariable Long id,
-                                                             @RequestBody(required = false) AdminDisputeResolveRequest request) {
-        String resolution = request == null ? null : request.getResolution();
-        return ApiResponse.success(adminApplicationService.resolveDispute(id, true, resolution));
+        return ApiResponse.success(adminApplicationService.decideDispute(
+            id,
+            request.getAdminActionType(),
+            request.getDecisionAmount() == null ? null : request.getDecisionAmount().movePointRight(2).intValue(),
+            request.getReason()
+        ));
     }
 
     @GetMapping("/reviews")
@@ -155,22 +231,38 @@ public class AdminController {
 
     @PostMapping("/props/qr-code")
     public ApiResponse<PropResponse> generatePropQrCode() {
-        return ApiResponse.success(propApplicationService.createPendingFillProp());
+        return ApiResponse.success(adminApplicationService.createPendingFillProp());
     }
 
     @GetMapping("/props/pending-fill")
     public ApiResponse<List<PropResponse>> pendingFillProps() {
-        return ApiResponse.success(propApplicationService.listAdminPendingFillProps());
+        return ApiResponse.success(adminApplicationService.listAdminPendingFillProps());
     }
 
     @GetMapping("/props/qr-codes")
     public ApiResponse<List<PropResponse>> qrCodeProps() {
-        return ApiResponse.success(propApplicationService.listAdminQrCodeProps());
+        return ApiResponse.success(adminApplicationService.listAdminQrCodeProps());
     }
 
     @PostMapping("/props/qr-codes/{propId}/revoke")
     public ApiResponse<List<PropResponse>> revokeQrCode(@PathVariable Long propId) {
-        return ApiResponse.success(propApplicationService.revokePendingQrCode(propId));
+        return ApiResponse.success(adminApplicationService.revokeQrCode(propId));
+    }
+
+    @GetMapping("/props/{propId}/instances")
+    public ApiResponse<List<PropInstanceResponse>> adminPropInstances(@PathVariable Long propId) {
+        return ApiResponse.success(adminApplicationService.listPropInstances(propId));
+    }
+
+    @PostMapping("/prop-instances/{instanceId}/status")
+    public ApiResponse<PropInstanceResponse> updateAdminPropInstanceStatus(@PathVariable Long instanceId,
+                                                                           @Valid @RequestBody PropInstanceStatusUpdateRequest request) {
+        return ApiResponse.success(adminApplicationService.updatePropInstanceStatus(instanceId, request.getTargetStatus(), request.getReason(), request.getRelatedOrderId()));
+    }
+
+    @GetMapping("/prop-instances/{instanceId}/status-logs")
+    public ApiResponse<List<PropInstanceStatusLogResponse>> adminPropInstanceStatusLogs(@PathVariable Long instanceId) {
+        return ApiResponse.success(adminApplicationService.listPropInstanceStatusLogs(instanceId));
     }
 
     @PostMapping("/users/{id}/roles")

@@ -7,12 +7,14 @@ import com.muhou.backend.infrastructure.client.WechatPaymentGateway;
 import com.muhou.backend.infrastructure.persistence.entity.DisputeEntity;
 import com.muhou.backend.infrastructure.persistence.entity.OrderFundFlowEntity;
 import com.muhou.backend.infrastructure.persistence.entity.RentalOrderEntity;
+import com.muhou.backend.infrastructure.persistence.mapper.DisputeMapper;
 import com.muhou.backend.infrastructure.persistence.mapper.OrderFundFlowMapper;
 import com.muhou.backend.infrastructure.persistence.mapper.PaymentOrderLinkMapper;
 import com.muhou.backend.infrastructure.persistence.mapper.RentalOrderMapper;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.List;
 import java.util.UUID;
 
 @Service
@@ -24,15 +26,18 @@ public class OrderSettlementApplicationService {
     private final PaymentOrderLinkMapper paymentOrderLinkMapper;
     private final WechatPaymentGateway wechatPaymentGateway;
     private final RentalOrderMapper rentalOrderMapper;
+    private final DisputeMapper disputeMapper;
 
     public OrderSettlementApplicationService(OrderFundFlowMapper orderFundFlowMapper,
                                              PaymentOrderLinkMapper paymentOrderLinkMapper,
                                              WechatPaymentGateway wechatPaymentGateway,
-                                             RentalOrderMapper rentalOrderMapper) {
+                                             RentalOrderMapper rentalOrderMapper,
+                                             DisputeMapper disputeMapper) {
         this.orderFundFlowMapper = orderFundFlowMapper;
         this.paymentOrderLinkMapper = paymentOrderLinkMapper;
         this.wechatPaymentGateway = wechatPaymentGateway;
         this.rentalOrderMapper = rentalOrderMapper;
+        this.disputeMapper = disputeMapper;
     }
 
     @Transactional
@@ -55,7 +60,7 @@ public class OrderSettlementApplicationService {
     }
 
     @Transactional
-    public void settleDisputeOrder(RentalOrderEntity order, DisputeEntity dispute, boolean approved) {
+    private void settleDisputeOrder(RentalOrderEntity order, DisputeEntity dispute, boolean approved) {
         if (order == null || order.getId() == null || dispute == null || orderFundFlowMapper.countByOrderId(order.getId()) > 0) {
             return;
         }
@@ -73,6 +78,61 @@ public class OrderSettlementApplicationService {
             return;
         }
         throw new BizException(ResultCode.VALIDATION_ERROR, "不支持的仲裁申请方");
+    }
+
+    @Transactional
+    public void settleFinalOrder(RentalOrderEntity order, List<DisputeEntity> disputes) {
+        if (order == null || order.getId() == null) {
+            return;
+        }
+        if (orderFundFlowMapper.countByOrderId(order.getId()) > 0) {
+            disputeMapper.markPendingSettlementExecuted(order.getId());
+            return;
+        }
+        int rentFen = positive(order.getRentAmountFen());
+        int depositFen = positive(order.getDepositAmountFen());
+        int demanderCompensationFen = 0;
+        int supplierCompensationFen = 0;
+        if (disputes != null) {
+            for (DisputeEntity dispute : disputes) {
+                if (!"resolved".equals(dispute.getDisputeStatus())) {
+                    continue;
+                }
+                int amount = positive(dispute.getAdminDecisionAmountFen());
+                if ("demander".equals(dispute.getApplicantRole())) {
+                    demanderCompensationFen += amount;
+                } else if ("supplier".equals(dispute.getApplicantRole())) {
+                    supplierCompensationFen += amount;
+                }
+            }
+        }
+        demanderCompensationFen = Math.min(demanderCompensationFen, rentFen);
+        supplierCompensationFen = Math.min(supplierCompensationFen, depositFen);
+        int remainingRentFen = rentFen - demanderCompensationFen;
+        int platformFen = calculatePlatformCommission(remainingRentFen);
+        int supplierRentFen = remainingRentFen - platformFen;
+        int userDepositRefundFen = depositFen - supplierCompensationFen;
+
+        createRefund(order, null, "deposit_refund", order.getDemanderUserId(), userDepositRefundFen, "订单最终结算，退还剩余押金");
+        createRefund(order, null, "demander_compensation", order.getDemanderUserId(), demanderCompensationFen, "订单最终结算，执行租赁方仲裁赔付");
+        createProfitShare(order, null, "platform_commission", "platform_admin", null, platformFen, "订单最终结算，平台收取实际费用20%");
+        createProfitShare(order, null, "supplier_settlement", "supplier", order.getSupplierUserId(), supplierRentFen, "订单最终结算，工厂获得实际费用80%");
+        createProfitShare(order, null, "supplier_compensation", "supplier", order.getSupplierUserId(), supplierCompensationFen, "订单最终结算，从押金中赔付工厂");
+        paymentOrderLinkMapper.addRefundAmount(order.getId(), userDepositRefundFen + demanderCompensationFen);
+        paymentOrderLinkMapper.addSettlementAmount(order.getId(), supplierRentFen + supplierCompensationFen);
+        rentalOrderMapper.updateSettlementSummary(order.getId(), "settled", userDepositRefundFen + demanderCompensationFen);
+        disputeMapper.markPendingSettlementExecuted(order.getId());
+    }
+
+    @Transactional
+    public void recordCancellationSettlement(RentalOrderEntity order, int refundFen, int retainedFeeFen, String remark) {
+        if (order == null || order.getId() == null || orderFundFlowMapper.countByOrderId(order.getId()) > 0) {
+            return;
+        }
+        createRefund(order, null, "order_cancel_refund", order.getDemanderUserId(), Math.max(refundFen, 0), remark);
+        createInternalFlow(order, "cancel_fee_retained", "platform_admin", null, Math.max(retainedFeeFen, 0), "取消规则扣除租赁费，第一版记为平台待处理收入");
+        paymentOrderLinkMapper.addRefundAmount(order.getId(), Math.max(refundFen, 0));
+        rentalOrderMapper.updateSettlementSummary(order.getId(), retainedFeeFen > 0 ? "partial_refunded" : "refunded", Math.max(refundFen, 0));
     }
 
     private void settleDemanderApproved(RentalOrderEntity order, DisputeEntity dispute) {
@@ -167,6 +227,37 @@ public class OrderSettlementApplicationService {
         entity.setWechatOutNo(result.getOutNo());
         entity.setWechatTransactionId(result.getTransactionId());
         entity.setWechatResponse(result.getRawResponse());
+        entity.setRemark(remark);
+        orderFundFlowMapper.insert(entity);
+    }
+
+    private void createInternalFlow(RentalOrderEntity order,
+                                    String flowType,
+                                    String receiverRole,
+                                    Long receiverUserId,
+                                    int amountFen,
+                                    String remark) {
+        if (amountFen <= 0) {
+            return;
+        }
+        OrderFundFlowEntity entity = new OrderFundFlowEntity();
+        entity.setFlowNo(buildFlowNo("IN"));
+        entity.setOrderId(order.getId());
+        entity.setDisputeId(null);
+        entity.setPaymentId(order.getCurrentPaymentId());
+        entity.setFlowType(flowType);
+        entity.setFlowDirection("platform_internal");
+        entity.setPayerRole("platform");
+        entity.setPayerUserId(null);
+        entity.setReceiverRole(receiverRole);
+        entity.setReceiverUserId(receiverUserId);
+        entity.setAmountFen(amountFen);
+        entity.setCurrency("CNY");
+        entity.setChannelAction("internal_record");
+        entity.setChannelStatus("success");
+        entity.setWechatOutNo(null);
+        entity.setWechatTransactionId(null);
+        entity.setWechatResponse("{}");
         entity.setRemark(remark);
         orderFundFlowMapper.insert(entity);
     }

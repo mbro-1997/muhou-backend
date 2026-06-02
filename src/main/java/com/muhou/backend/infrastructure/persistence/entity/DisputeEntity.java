@@ -9,9 +9,12 @@ public class DisputeEntity {
     private Long applyUserId;
     private String applicantRole;
     private String applyStage;
+    private String reasonCode;
+    private String reasonLabel;
     private String title;
     private String content;
     private Integer claimAmountFen;
+    private Integer adminDecisionAmountFen;
     private Integer depositAmountFenSnapshot;
     private String orderStatusSnapshot;
     private Long demanderUserId;
@@ -21,6 +24,8 @@ public class DisputeEntity {
     private String resolution;
     private String resolutionType;
     private String refundStatus;
+    private String fundEffectStatus;
+    private String adminActionType;
     private Long reviewerId;
     private String applicantName;
     private String orderNo;
@@ -37,12 +42,18 @@ public class DisputeEntity {
     public void setApplicantRole(String applicantRole) { this.applicantRole = applicantRole; }
     public String getApplyStage() { return applyStage; }
     public void setApplyStage(String applyStage) { this.applyStage = applyStage; }
+    public String getReasonCode() { return reasonCode; }
+    public void setReasonCode(String reasonCode) { this.reasonCode = reasonCode; }
+    public String getReasonLabel() { return reasonLabel; }
+    public void setReasonLabel(String reasonLabel) { this.reasonLabel = reasonLabel; }
     public String getTitle() { return title; }
     public void setTitle(String title) { this.title = title; }
     public String getContent() { return content; }
     public void setContent(String content) { this.content = content; }
     public Integer getClaimAmountFen() { return claimAmountFen; }
     public void setClaimAmountFen(Integer claimAmountFen) { this.claimAmountFen = claimAmountFen; }
+    public Integer getAdminDecisionAmountFen() { return adminDecisionAmountFen; }
+    public void setAdminDecisionAmountFen(Integer adminDecisionAmountFen) { this.adminDecisionAmountFen = adminDecisionAmountFen; }
     public Integer getDepositAmountFenSnapshot() { return depositAmountFenSnapshot; }
     public void setDepositAmountFenSnapshot(Integer depositAmountFenSnapshot) { this.depositAmountFenSnapshot = depositAmountFenSnapshot; }
     public String getOrderStatusSnapshot() { return orderStatusSnapshot; }
@@ -61,6 +72,10 @@ public class DisputeEntity {
     public void setResolutionType(String resolutionType) { this.resolutionType = resolutionType; }
     public String getRefundStatus() { return refundStatus; }
     public void setRefundStatus(String refundStatus) { this.refundStatus = refundStatus; }
+    public String getFundEffectStatus() { return fundEffectStatus; }
+    public void setFundEffectStatus(String fundEffectStatus) { this.fundEffectStatus = fundEffectStatus; }
+    public String getAdminActionType() { return adminActionType; }
+    public void setAdminActionType(String adminActionType) { this.adminActionType = adminActionType; }
     public Long getReviewerId() { return reviewerId; }
     public void setReviewerId(Long reviewerId) { this.reviewerId = reviewerId; }
     public String getApplicantName() { return applicantName; }

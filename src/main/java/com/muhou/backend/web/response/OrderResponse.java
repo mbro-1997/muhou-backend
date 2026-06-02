@@ -23,6 +23,10 @@ public class OrderResponse {
     private String useScene;
     private String specialRemark;
     private String cancelReason;
+    private String cancelType;
+    private boolean canCancel;
+    private boolean canSupplierCancelAfterConfirm;
+    private boolean canContactService;
     private String demanderName;
     private String demanderPhone;
     private String demanderIdentity;
@@ -89,6 +93,14 @@ public class OrderResponse {
     public void setSpecialRemark(String specialRemark) { this.specialRemark = specialRemark; }
     public String getCancelReason() { return cancelReason; }
     public void setCancelReason(String cancelReason) { this.cancelReason = cancelReason; }
+    public String getCancelType() { return cancelType; }
+    public void setCancelType(String cancelType) { this.cancelType = cancelType; }
+    public boolean isCanCancel() { return canCancel; }
+    public void setCanCancel(boolean canCancel) { this.canCancel = canCancel; }
+    public boolean isCanSupplierCancelAfterConfirm() { return canSupplierCancelAfterConfirm; }
+    public void setCanSupplierCancelAfterConfirm(boolean canSupplierCancelAfterConfirm) { this.canSupplierCancelAfterConfirm = canSupplierCancelAfterConfirm; }
+    public boolean isCanContactService() { return canContactService; }
+    public void setCanContactService(boolean canContactService) { this.canContactService = canContactService; }
     public String getDemanderName() { return demanderName; }
     public void setDemanderName(String demanderName) { this.demanderName = demanderName; }
     public String getDemanderPhone() { return demanderPhone; }

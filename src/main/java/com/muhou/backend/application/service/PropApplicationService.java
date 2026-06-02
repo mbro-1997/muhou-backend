@@ -6,17 +6,25 @@ import com.muhou.backend.common.exception.BizException;
 import com.muhou.backend.common.support.CurrentUserSupport;
 import com.muhou.backend.common.support.StatusTextHelper;
 import com.muhou.backend.common.util.MoneyUtils;
+import com.muhou.backend.common.util.TimeUtils;
 import com.muhou.backend.infrastructure.client.WechatMiniappCodeGateway;
 import com.muhou.backend.infrastructure.persistence.entity.PropAuditEntity;
 import com.muhou.backend.infrastructure.persistence.entity.PropEntity;
 import com.muhou.backend.infrastructure.persistence.entity.PropImageEntity;
+import com.muhou.backend.infrastructure.persistence.entity.PropInstanceEntity;
+import com.muhou.backend.infrastructure.persistence.entity.PropInstanceStatusLogEntity;
 import com.muhou.backend.infrastructure.persistence.entity.PropQrCodeEntity;
 import com.muhou.backend.infrastructure.persistence.mapper.PropAuditMapper;
 import com.muhou.backend.infrastructure.persistence.mapper.PropImageMapper;
+import com.muhou.backend.infrastructure.persistence.mapper.PropInstanceMapper;
+import com.muhou.backend.infrastructure.persistence.mapper.PropInstanceStatusLogMapper;
 import com.muhou.backend.infrastructure.persistence.mapper.PropMapper;
 import com.muhou.backend.infrastructure.persistence.mapper.PropQrCodeMapper;
+import com.muhou.backend.infrastructure.persistence.mapper.RentalOrderMapper;
 import com.muhou.backend.infrastructure.persistence.mapper.UserRoleMapper;
 import com.muhou.backend.web.request.CreatePropRequest;
+import com.muhou.backend.web.response.PropInstanceResponse;
+import com.muhou.backend.web.response.PropInstanceStatusLogResponse;
 import com.muhou.backend.web.response.PropResponse;
 import com.muhou.backend.web.response.QrCodeResolveResponse;
 import org.springframework.core.io.Resource;
@@ -40,7 +48,10 @@ public class PropApplicationService {
     private final PropMapper propMapper;
     private final PropAuditMapper propAuditMapper;
     private final PropImageMapper propImageMapper;
+    private final PropInstanceMapper propInstanceMapper;
+    private final PropInstanceStatusLogMapper propInstanceStatusLogMapper;
     private final PropQrCodeMapper propQrCodeMapper;
+    private final RentalOrderMapper rentalOrderMapper;
     private final WechatMiniappCodeGateway wechatMiniappCodeGateway;
     private final QrCodeArchiveService qrCodeArchiveService;
     private final CurrentUserSupport currentUserSupport;
@@ -49,7 +60,10 @@ public class PropApplicationService {
     public PropApplicationService(PropMapper propMapper,
                                   PropAuditMapper propAuditMapper,
                                   PropImageMapper propImageMapper,
+                                  PropInstanceMapper propInstanceMapper,
+                                  PropInstanceStatusLogMapper propInstanceStatusLogMapper,
                                   PropQrCodeMapper propQrCodeMapper,
+                                  RentalOrderMapper rentalOrderMapper,
                                   WechatMiniappCodeGateway wechatMiniappCodeGateway,
                                   QrCodeArchiveService qrCodeArchiveService,
                                   CurrentUserSupport currentUserSupport,
@@ -57,7 +71,10 @@ public class PropApplicationService {
         this.propMapper = propMapper;
         this.propAuditMapper = propAuditMapper;
         this.propImageMapper = propImageMapper;
+        this.propInstanceMapper = propInstanceMapper;
+        this.propInstanceStatusLogMapper = propInstanceStatusLogMapper;
         this.propQrCodeMapper = propQrCodeMapper;
+        this.rentalOrderMapper = rentalOrderMapper;
         this.wechatMiniappCodeGateway = wechatMiniappCodeGateway;
         this.qrCodeArchiveService = qrCodeArchiveService;
         this.currentUserSupport = currentUserSupport;
@@ -203,6 +220,16 @@ public class PropApplicationService {
         entity.setRemark("工厂扫码录入并提交审核");
         propMapper.updatePendingFill(entity);
         propQrCodeMapper.markFilled(entity.getId(), supplierUserId);
+        PropInstanceEntity instance = new PropInstanceEntity();
+        instance.setPropId(entity.getId());
+        instance.setQrCodeId(entity.getQrCodeId());
+        instance.setInstanceNo("SN-" + entity.getId() + "-1");
+        instance.setInstanceStatus("idle");
+        instance.setCurrentOrderId(null);
+        instance.setRemark("factory scan-in bound physical instance");
+        instance.setStatusChangedAt(LocalDateTime.now());
+        instance.setStatusChangedBy(supplierUserId);
+        propInstanceMapper.insert(instance);
         replaceImages(entity.getId(), normalizeRequestImages(request));
         createAuditRecord(entity.getId(), "create", "工厂补全扫码入库资料，待管理员确认");
         return getProp(entity.getId());
@@ -214,7 +241,7 @@ public class PropApplicationService {
         if ("pending".equals(prop.getAuditStatus())) {
             throw new BizException(ResultCode.CONFLICT, "当前道具正在审核中，暂不可重复提交");
         }
-        if ("locked".equals(prop.getPropStatus()) || "renting".equals(prop.getPropStatus())) {
+        if (propInstanceMapper.countActiveByPropId(id) > 0) {
             throw new BizException(ResultCode.CONFLICT, "租赁中或已锁定道具不可操作");
         }
 
@@ -256,7 +283,78 @@ public class PropApplicationService {
         response.setFillStatus(entity.getFillStatus());
         response.setSupplierUserId(entity.getSupplierUserId());
         response.setSupplierName(entity.getSupplierUserId() == null ? "未绑定工厂" : "工厂 " + entity.getSupplierUserId());
+        int assetTotalStock = propInstanceMapper.countTotalByPropId(entity.getId());
+        int totalStock = propInstanceMapper.countOperatingByPropId(entity.getId());
+        int availableStock = propInstanceMapper.countByPropIdAndStatus(entity.getId(), "idle");
+        int lockedStock = propInstanceMapper.countByPropIdAndStatus(entity.getId(), "locked");
+        int rentedStock = propInstanceMapper.countByPropIdAndStatus(entity.getId(), "renting");
+        int repairingStock = propInstanceMapper.countByPropIdAndStatus(entity.getId(), "repairing");
+        int lostStock = propInstanceMapper.countByPropIdAndStatus(entity.getId(), "lost");
+        int scrappedStock = propInstanceMapper.countByPropIdAndStatus(entity.getId(), "scrapped");
+        response.setAssetTotalStock(assetTotalStock);
+        response.setTotalStock(totalStock);
+        response.setAvailableStock(availableStock);
+        response.setLockedStock(lockedStock);
+        response.setRentedStock(rentedStock);
+        response.setRepairingStock(repairingStock);
+        response.setLostStock(lostStock);
+        response.setScrappedStock(scrappedStock);
+        response.setCanRent("approved".equals(entity.getAuditStatus())
+            && "filled".equals(entity.getFillStatus())
+            && "idle".equals(entity.getPropStatus())
+            && availableStock > 0);
         return response;
+    }
+
+    public List<PropInstanceResponse> listFactoryPropInstances(Long propId) {
+        requireOwnedProp(propId);
+        return propInstanceMapper.selectByPropId(propId).stream()
+            .map(item -> toInstanceResponse(item, false))
+            .toList();
+    }
+
+    public List<PropInstanceResponse> listAdminPropInstances(Long propId) {
+        requireAdminRole();
+        return propInstanceMapper.selectByPropId(propId).stream()
+            .map(item -> toInstanceResponse(item, true))
+            .toList();
+    }
+
+    @Transactional
+    public PropInstanceResponse updateFactoryInstanceStatus(Long instanceId, String targetStatus, String reason) {
+        Long supplierUserId = currentSupplierUserId();
+        PropInstanceEntity instance = requireInstance(instanceId);
+        PropEntity prop = requireProp(instance.getPropId());
+        if (prop.getSupplierUserId() == null || !supplierUserId.equals(prop.getSupplierUserId())) {
+            throw new BizException(ResultCode.FORBIDDEN, "Current factory cannot operate this SN");
+        }
+        updateInstanceStatus(instance, normalizeTargetStatus(targetStatus), reason, null, "supplier", supplierUserId);
+        return toInstanceResponse(propInstanceMapper.selectById(instanceId), false);
+    }
+
+    @Transactional
+    public PropInstanceResponse updateAdminInstanceStatus(Long instanceId, String targetStatus, String reason, Long relatedOrderId) {
+        requireAdminRole();
+        Long adminUserId = currentUserSupport.requireCurrentUserId();
+        PropInstanceEntity instance = requireInstance(instanceId);
+        updateInstanceStatus(instance, normalizeTargetStatus(targetStatus), reason, relatedOrderId, "admin", adminUserId);
+        return toInstanceResponse(propInstanceMapper.selectById(instanceId), true);
+    }
+
+    public List<PropInstanceStatusLogResponse> listFactoryInstanceStatusLogs(Long instanceId) {
+        PropInstanceEntity instance = requireInstance(instanceId);
+        requireOwnedProp(instance.getPropId());
+        return propInstanceStatusLogMapper.selectByInstanceId(instanceId).stream()
+            .map(this::toStatusLogResponse)
+            .toList();
+    }
+
+    public List<PropInstanceStatusLogResponse> listAdminInstanceStatusLogs(Long instanceId) {
+        requireAdminRole();
+        requireInstance(instanceId);
+        return propInstanceStatusLogMapper.selectByInstanceId(instanceId).stream()
+            .map(this::toStatusLogResponse)
+            .toList();
     }
 
     public QrCodeResolveResponse resolveQrCode(String qrCodeId) {
@@ -399,10 +497,28 @@ public class PropApplicationService {
                 .limit(8)
                 .toList();
             if (!images.isEmpty()) {
+                assertPersistedImages(images);
                 return images;
             }
         }
-        return parseImages(firstNonBlank(request.getImageUrl(), request.getImage(), REAL_PROP_IMAGE_URL));
+        List<String> images = parseImages(firstNonBlank(request.getImageUrl(), request.getImage(), REAL_PROP_IMAGE_URL));
+        assertPersistedImages(images);
+        return images;
+    }
+
+    private void assertPersistedImages(List<String> images) {
+        for (String image : images) {
+            String lower = image == null ? "" : image.trim().toLowerCase();
+            if (lower.startsWith("wxfile://")
+                || lower.startsWith("file://")
+                || lower.startsWith("blob:")
+                || lower.startsWith("http://tmp")
+                || lower.startsWith("https://tmp")
+                || lower.contains("tempfilepath")
+                || lower.contains("/tmp/")) {
+                throw new BizException(ResultCode.VALIDATION_ERROR, "Image must be uploaded before submitting business data");
+            }
+        }
     }
 
     private String requireOption(String value, List<String> options, String label) {
@@ -446,6 +562,143 @@ public class PropApplicationService {
         if (!roleBindings.contains("admin")) {
             throw new BizException(ResultCode.FORBIDDEN, "当前账号不是管理员，无法查看二维码列表");
         }
+    }
+
+    private PropInstanceEntity requireInstance(Long instanceId) {
+        PropInstanceEntity instance = propInstanceMapper.selectById(instanceId);
+        if (instance == null) {
+            throw new BizException(ResultCode.NOT_FOUND, "SN does not exist");
+        }
+        return instance;
+    }
+
+    private String normalizeTargetStatus(String targetStatus) {
+        String normalized = targetStatus == null ? "" : targetStatus.trim().toLowerCase();
+        if (List.of("idle", "repairing", "lost", "scrapped").contains(normalized)) {
+            return normalized;
+        }
+        throw new BizException(ResultCode.VALIDATION_ERROR, "Unsupported SN target status");
+    }
+
+    private void updateInstanceStatus(PropInstanceEntity instance,
+                                      String targetStatus,
+                                      String reason,
+                                      Long relatedOrderId,
+                                      String operatorRole,
+                                      Long operatorUserId) {
+        String trimmedReason = reason == null ? "" : reason.trim();
+        if (trimmedReason.isBlank()) {
+            throw new BizException(ResultCode.VALIDATION_ERROR, "Reason is required");
+        }
+        validateInstanceTransition(instance.getInstanceStatus(), targetStatus, operatorRole);
+        int updated = propInstanceMapper.updateStatus(
+            instance.getId(),
+            instance.getInstanceStatus(),
+            targetStatus,
+            trimmedReason,
+            operatorUserId
+        );
+        if (updated <= 0) {
+            throw new BizException(ResultCode.CONFLICT, "SN status changed, please refresh and retry");
+        }
+        PropInstanceStatusLogEntity log = new PropInstanceStatusLogEntity();
+        log.setPropInstanceId(instance.getId());
+        log.setPropId(instance.getPropId());
+        log.setInstanceNo(instance.getInstanceNo());
+        log.setQrCodeId(instance.getQrCodeId());
+        log.setFromStatus(instance.getInstanceStatus());
+        log.setToStatus(targetStatus);
+        log.setReason(trimmedReason);
+        log.setOperatorUserId(operatorUserId);
+        log.setOperatorRole(operatorRole);
+        log.setRelatedOrderId(relatedOrderId);
+        propInstanceStatusLogMapper.insert(log);
+    }
+
+    private void validateInstanceTransition(String fromStatus, String targetStatus, String operatorRole) {
+        if ("supplier".equals(operatorRole)) {
+            if ("idle".equals(fromStatus) && List.of("repairing", "lost", "scrapped").contains(targetStatus)) {
+                return;
+            }
+            if ("repairing".equals(fromStatus) && List.of("idle", "scrapped").contains(targetStatus)) {
+                return;
+            }
+            throw new BizException(ResultCode.FORBIDDEN, "Factory cannot perform this SN status transition");
+        }
+        if ("admin".equals(operatorRole)) {
+            if ("lost".equals(fromStatus) && List.of("idle", "repairing").contains(targetStatus)) {
+                return;
+            }
+            if ("scrapped".equals(fromStatus) && List.of("idle", "repairing").contains(targetStatus)) {
+                return;
+            }
+            if ("idle".equals(fromStatus) && List.of("repairing", "lost", "scrapped").contains(targetStatus)) {
+                return;
+            }
+            if ("repairing".equals(fromStatus) && List.of("idle", "scrapped").contains(targetStatus)) {
+                return;
+            }
+            throw new BizException(ResultCode.FORBIDDEN, "Admin cannot perform this SN status transition");
+        }
+        throw new BizException(ResultCode.FORBIDDEN, "Unsupported operator role");
+    }
+
+    private PropInstanceResponse toInstanceResponse(PropInstanceEntity entity, boolean adminMode) {
+        PropInstanceResponse response = new PropInstanceResponse();
+        response.setId(entity.getId());
+        response.setPropId(entity.getPropId());
+        response.setInstanceNo(entity.getInstanceNo());
+        response.setQrCodeId(entity.getQrCodeId());
+        response.setInstanceStatus(entity.getInstanceStatus());
+        response.setInstanceStatusText(instanceStatusText(entity.getInstanceStatus()));
+        response.setCurrentOrderId(entity.getCurrentOrderId());
+        if (entity.getCurrentOrderId() != null) {
+            var order = rentalOrderMapper.selectById(entity.getCurrentOrderId());
+            response.setCurrentOrderNo(order == null ? "" : order.getOrderNo());
+        }
+        response.setStatusRemark(entity.getStatusRemark());
+        response.setStatusChangedAt(TimeUtils.format(entity.getStatusChangedAt()));
+        response.setStatusChangedBy(entity.getStatusChangedBy());
+        response.setCanMarkRepairing("idle".equals(entity.getInstanceStatus()) || (adminMode && "lost".equals(entity.getInstanceStatus())) || (adminMode && "scrapped".equals(entity.getInstanceStatus())));
+        response.setCanMarkLost("idle".equals(entity.getInstanceStatus()));
+        response.setCanMarkScrapped("idle".equals(entity.getInstanceStatus()) || "repairing".equals(entity.getInstanceStatus()));
+        response.setCanRestoreIdle("repairing".equals(entity.getInstanceStatus()) || (adminMode && "lost".equals(entity.getInstanceStatus())) || (adminMode && "scrapped".equals(entity.getInstanceStatus())));
+        response.setCanScrapFromRepairing("repairing".equals(entity.getInstanceStatus()));
+        if (!adminMode && ("lost".equals(entity.getInstanceStatus()) || "scrapped".equals(entity.getInstanceStatus()))) {
+            response.setCanRestoreIdle(false);
+        }
+        return response;
+    }
+
+    private PropInstanceStatusLogResponse toStatusLogResponse(PropInstanceStatusLogEntity entity) {
+        PropInstanceStatusLogResponse response = new PropInstanceStatusLogResponse();
+        response.setId(entity.getId());
+        response.setPropInstanceId(entity.getPropInstanceId());
+        response.setPropId(entity.getPropId());
+        response.setInstanceNo(entity.getInstanceNo());
+        response.setQrCodeId(entity.getQrCodeId());
+        response.setFromStatus(entity.getFromStatus());
+        response.setFromStatusText(instanceStatusText(entity.getFromStatus()));
+        response.setToStatus(entity.getToStatus());
+        response.setToStatusText(instanceStatusText(entity.getToStatus()));
+        response.setReason(entity.getReason());
+        response.setOperatorUserId(entity.getOperatorUserId());
+        response.setOperatorRole(entity.getOperatorRole());
+        response.setRelatedOrderId(entity.getRelatedOrderId());
+        response.setCreatedAt(TimeUtils.format(entity.getCreatedAt()));
+        return response;
+    }
+
+    private String instanceStatusText(String status) {
+        return switch (status == null ? "" : status) {
+            case "idle" -> "空闲";
+            case "locked" -> "已锁定";
+            case "renting" -> "租赁中";
+            case "repairing" -> "维修中";
+            case "lost" -> "丢失";
+            case "scrapped" -> "报废";
+            default -> status == null ? "未知" : status;
+        };
     }
 
     private String resolveStatusText(PropEntity entity) {

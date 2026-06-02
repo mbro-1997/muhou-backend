@@ -8,10 +8,12 @@ import com.muhou.backend.common.util.MoneyUtils;
 import com.muhou.backend.common.util.TimeUtils;
 import com.muhou.backend.infrastructure.persistence.entity.AdminReviewEntity;
 import com.muhou.backend.infrastructure.persistence.entity.DisputeEntity;
+import com.muhou.backend.infrastructure.persistence.entity.OrderAdminActionEntity;
 import com.muhou.backend.infrastructure.persistence.entity.PropAuditEntity;
 import com.muhou.backend.infrastructure.persistence.entity.PropImageEntity;
 import com.muhou.backend.infrastructure.persistence.entity.RentalOrderEntity;
 import com.muhou.backend.infrastructure.persistence.mapper.DisputeMapper;
+import com.muhou.backend.infrastructure.persistence.mapper.OrderAdminActionMapper;
 import com.muhou.backend.infrastructure.persistence.mapper.OrderReviewMapper;
 import com.muhou.backend.infrastructure.persistence.mapper.PropAuditMapper;
 import com.muhou.backend.infrastructure.persistence.mapper.PropImageMapper;
@@ -27,6 +29,9 @@ import com.muhou.backend.web.response.FactoryAuditResponse;
 import com.muhou.backend.web.response.FactoryInviteCodeResponse;
 import com.muhou.backend.web.response.FactoryInviteCreateResponse;
 import com.muhou.backend.web.response.PropAuditResponse;
+import com.muhou.backend.web.response.PropInstanceResponse;
+import com.muhou.backend.web.response.PropInstanceStatusLogResponse;
+import com.muhou.backend.web.response.PropResponse;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -48,6 +53,8 @@ public class AdminApplicationService {
     private final FactoryOnboardingApplicationService factoryOnboardingApplicationService;
     private final UserRoleMapper userRoleMapper;
     private final OrderSettlementApplicationService orderSettlementApplicationService;
+    private final OrderAdminActionMapper orderAdminActionMapper;
+    private final PropApplicationService propApplicationService;
 
     public AdminApplicationService(PropAuditMapper propAuditMapper,
                                    DisputeMapper disputeMapper,
@@ -59,7 +66,9 @@ public class AdminApplicationService {
                                    CurrentUserSupport currentUserSupport,
                                    FactoryOnboardingApplicationService factoryOnboardingApplicationService,
                                    UserRoleMapper userRoleMapper,
-                                   OrderSettlementApplicationService orderSettlementApplicationService) {
+                                   OrderSettlementApplicationService orderSettlementApplicationService,
+                                   OrderAdminActionMapper orderAdminActionMapper,
+                                   PropApplicationService propApplicationService) {
         this.propAuditMapper = propAuditMapper;
         this.disputeMapper = disputeMapper;
         this.orderReviewMapper = orderReviewMapper;
@@ -71,6 +80,8 @@ public class AdminApplicationService {
         this.factoryOnboardingApplicationService = factoryOnboardingApplicationService;
         this.userRoleMapper = userRoleMapper;
         this.orderSettlementApplicationService = orderSettlementApplicationService;
+        this.orderAdminActionMapper = orderAdminActionMapper;
+        this.propApplicationService = propApplicationService;
     }
 
     public AdminOverviewResponse getOverview() {
@@ -104,7 +115,15 @@ public class AdminApplicationService {
 
     @Transactional
     public List<FactoryAuditResponse> reviewFactoryAudit(Long id, boolean approved, String remark) {
-        return factoryOnboardingApplicationService.reviewFactoryAudit(id, approved, remark);
+        List<FactoryAuditResponse> result = factoryOnboardingApplicationService.reviewFactoryAudit(id, approved, remark);
+        recordGlobalAdminAction(
+            approved ? "review_factory_audit_approved" : "review_factory_audit_rejected",
+            "factory_audit",
+            null,
+            approved ? "管理员通过工厂入驻审核" : "管理员驳回工厂入驻审核",
+            "factoryAuditId=" + id + "; remark=" + safe(remark)
+        );
+        return result;
     }
 
     public List<FactoryInviteCodeResponse> listFactoryInviteCodes() {
@@ -113,12 +132,31 @@ public class AdminApplicationService {
 
     @Transactional
     public FactoryInviteCreateResponse createFactoryInviteCode(Integer expireDays, String remark) {
-        return factoryOnboardingApplicationService.createInviteCode(expireDays, remark);
+        FactoryInviteCreateResponse response = factoryOnboardingApplicationService.createInviteCode(expireDays, remark);
+        recordGlobalAdminAction(
+            "generate_factory_invite_code",
+            "factory_invite_code",
+            null,
+            "管理员生成工厂邀请码",
+            "inviteCodeId=" + response.getId()
+                + "; codeSuffix=" + safe(response.getCodeSuffix())
+                + "; expireAt=" + safe(response.getExpireAt())
+                + "; remark=" + safe(remark)
+        );
+        return response;
     }
 
     @Transactional
     public List<FactoryInviteCodeResponse> revokeFactoryInviteCode(Long id) {
-        return factoryOnboardingApplicationService.revokeInviteCode(id);
+        List<FactoryInviteCodeResponse> result = factoryOnboardingApplicationService.revokeInviteCode(id);
+        recordGlobalAdminAction(
+            "revoke_factory_invite_code",
+            "factory_invite_code",
+            null,
+            "管理员作废工厂邀请码",
+            "inviteCodeId=" + id
+        );
+        return result;
     }
 
     public List<PropAuditResponse> listPropAudits() {
@@ -158,6 +196,16 @@ public class AdminApplicationService {
             resolvePropAuditStatusAfterReview(entity.getActionType(), approved),
             resolvePropStatusAfterAudit(entity.getActionType(), approved)
         );
+        recordGlobalAdminAction(
+            approved ? "review_prop_audit_approved" : "review_prop_audit_rejected",
+            "supplier",
+            entity.getSupplierUserId(),
+            approved ? "管理员通过道具审核" : "管理员驳回道具审核",
+            "propAuditId=" + id
+                + "; propId=" + entity.getPropId()
+                + "; propAction=" + safe(entity.getActionType())
+                + "; remark=" + safe(remark)
+        );
         return listPropAudits();
     }
 
@@ -189,28 +237,47 @@ public class AdminApplicationService {
     }
 
     @Transactional
-    public List<DisputeResponse> resolveDispute(Long id, boolean approved, String resolution) {
+    public List<DisputeResponse> decideDispute(Long id, String actionType, Integer decisionAmountFen, String resolution) {
         requireAdminRole();
         DisputeEntity entity = disputeMapper.selectById(id);
         if (entity == null) {
-            throw new BizException(ResultCode.NOT_FOUND, "未找到纠纷记录");
+            throw new BizException(ResultCode.NOT_FOUND, "仲裁记录不存在");
         }
         if (!"pending".equals(entity.getDisputeStatus())) {
             throw new BizException(ResultCode.CONFLICT, "当前仲裁已处理，不能重复裁定");
         }
-        String finalResolution = resolution == null || resolution.isBlank()
-            ? "管理员裁定：按平台规则处理押金与赔付。"
-            : resolution.trim();
-        String status = approved ? "resolved" : "closed";
-        String resolutionType = approved ? "approved" : "rejected";
-        String refundStatus = approved ? "refund_reserved" : "none";
-        int updated = disputeMapper.resolve(id, status, finalResolution, resolutionType, refundStatus, userApplicationService.resolveAdminUserId());
+        RentalOrderEntity order = rentalOrderMapper.selectById(entity.getOrderId());
+        if (order == null) {
+            throw new BizException(ResultCode.NOT_FOUND, "订单不存在");
+        }
+        validateDisputeStage(entity);
+        String normalizedAction = normalizeAdminActionType(entity.getApplyStage(), entity.getApplicantRole(), actionType);
+        int amountFen = resolveDecisionAmount(order, normalizedAction, decisionAmountFen);
+        boolean approved = !"reject".equals(normalizedAction);
+        String finalResolution = resolution == null || resolution.isBlank() ? "管理员裁定：按平台规则处理" : resolution.trim();
+        int updated = disputeMapper.decide(
+            id,
+            approved ? "resolved" : "closed",
+            finalResolution,
+            approved ? "approved" : "rejected",
+            approved ? "refund_reserved" : "none",
+            amountFen,
+            approved ? "pending_settlement" : "none",
+            normalizedAction,
+            userApplicationService.resolveAdminUserId()
+        );
         if (updated <= 0) {
             throw new BizException(ResultCode.CONFLICT, "当前仲裁状态已变化，请刷新后重试");
         }
-        rentalOrderMapper.markReviewed(entity.getOrderId(), java.time.LocalDateTime.now());
-        RentalOrderEntity order = rentalOrderMapper.selectById(entity.getOrderId());
-        orderSettlementApplicationService.settleDisputeOrder(order, entity, approved);
+        recordDisputeDecisionAction(order, entity, normalizedAction, amountFen, finalResolution);
+        if (shouldRunFinalSettlement(entity)) {
+            rentalOrderMapper.markReviewed(entity.getOrderId(), java.time.LocalDateTime.now());
+            DisputeEntity decided = disputeMapper.selectById(id);
+            List<DisputeEntity> disputes = disputeMapper.selectByOrderId(entity.getOrderId()).stream()
+                .map(item -> item.getId().equals(id) ? decided : item)
+                .toList();
+            orderSettlementApplicationService.settleFinalOrder(order, disputes);
+        }
         return listDisputes();
     }
 
@@ -244,6 +311,13 @@ public class AdminApplicationService {
     public List<AdminUserResponse> bindUserRole(Long userId, String role) {
         requireAdminRole();
         userApplicationService.bindRoleToUser(userId, role);
+        recordGlobalAdminAction(
+            "bind_user_role",
+            "user",
+            userId,
+            "管理员绑定用户角色",
+            "role=" + safe(role)
+        );
         return userApplicationService.listAdminUsers();
     }
 
@@ -251,7 +325,68 @@ public class AdminApplicationService {
     public List<AdminUserResponse> unbindUserRole(Long userId, String role) {
         requireAdminRole();
         userApplicationService.unbindRoleFromUser(userId, role);
+        recordGlobalAdminAction(
+            "unbind_user_role",
+            "user",
+            userId,
+            "管理员解绑用户角色",
+            "role=" + safe(role)
+        );
         return userApplicationService.listAdminUsers();
+    }
+
+    @Transactional
+    public PropResponse createPendingFillProp() {
+        requireAdminRole();
+        PropResponse response = propApplicationService.createPendingFillProp();
+        recordGlobalAdminAction(
+            "generate_prop_qr_code",
+            "prop_qr_code",
+            null,
+            "管理员生成未登记道具二维码",
+            "propId=" + response.getId() + "; qrCodeId=" + safe(response.getQrCodeId())
+        );
+        return response;
+    }
+
+    public List<PropResponse> listAdminPendingFillProps() {
+        requireAdminRole();
+        return propApplicationService.listAdminPendingFillProps();
+    }
+
+    public List<PropResponse> listAdminQrCodeProps() {
+        requireAdminRole();
+        return propApplicationService.listAdminQrCodeProps();
+    }
+
+    @Transactional
+    public List<PropResponse> revokeQrCode(Long propId) {
+        requireAdminRole();
+        List<PropResponse> result = propApplicationService.revokePendingQrCode(propId);
+        recordGlobalAdminAction(
+            "revoke_prop_qr_code",
+            "prop_qr_code",
+            null,
+            "管理员作废未登记道具二维码",
+            "propId=" + propId
+        );
+        return result;
+    }
+
+    public List<PropInstanceResponse> listPropInstances(Long propId) {
+        requireAdminRole();
+        return propApplicationService.listAdminPropInstances(propId);
+    }
+
+    @Transactional
+    public PropInstanceResponse updatePropInstanceStatus(Long instanceId, String targetStatus, String reason, Long relatedOrderId) {
+        requireAdminRole();
+        return propApplicationService.updateAdminInstanceStatus(instanceId, targetStatus, reason, relatedOrderId);
+    }
+
+    public List<PropInstanceStatusLogResponse> listPropInstanceStatusLogs(Long instanceId) {
+        requireAdminRole();
+        return propApplicationService.listAdminInstanceStatusLogs(instanceId);
     }
 
     private PropAuditResponse toPropAuditResponse(PropAuditEntity entity) {
@@ -305,8 +440,13 @@ public class AdminApplicationService {
         response.setApplicantRoleText("supplier".equals(entity.getApplicantRole()) ? "工厂方" : "租赁方");
         response.setApplyStage(entity.getApplyStage());
         response.setApplyStageText(disputeStageText(entity.getApplyStage()));
+        response.setReasonCode(entity.getReasonCode());
+        response.setReasonLabel(entity.getReasonLabel());
         response.setClaimAmount(MoneyUtils.fenToYuan(entity.getClaimAmountFen()));
+        response.setAdminDecisionAmount(MoneyUtils.fenToYuan(entity.getAdminDecisionAmountFen()));
         response.setDepositAmount(MoneyUtils.fenToYuan(entity.getDepositAmountFenSnapshot()));
+        response.setFundEffectStatus(entity.getFundEffectStatus());
+        response.setAdminActionType(entity.getAdminActionType());
         response.setEvidenceUrls(entity.getEvidenceUrls());
         response.setEvidenceImages(parseImages(entity.getEvidenceUrls()).stream()
             .filter(item -> !"/images/stage-prop-real.jpg".equals(item))
@@ -391,6 +531,106 @@ public class AdminApplicationService {
             return "新增";
         }
         return "上架";
+    }
+
+    private void validateDisputeStage(DisputeEntity dispute) {
+        if ("renting".equals(dispute.getApplyStage()) && "demander".equals(dispute.getApplicantRole())) {
+            return;
+        }
+        if ("wait_review".equals(dispute.getApplyStage()) && "supplier".equals(dispute.getApplicantRole())) {
+            return;
+        }
+        throw new BizException(ResultCode.CONFLICT, "当前订单阶段和发起方不允许处理正式仲裁");
+    }
+
+    private String normalizeAdminActionType(String applyStage, String applicantRole, String requestedActionType) {
+        if ("reject".equals(requestedActionType)) {
+            return "reject";
+        }
+        if ("renting".equals(applyStage) && "demander".equals(applicantRole)
+            && "approve_demander_compensation".equals(requestedActionType)) {
+            return "approve_demander_compensation";
+        }
+        if ("wait_review".equals(applyStage) && "supplier".equals(applicantRole)
+            && "approve_supplier_compensation".equals(requestedActionType)) {
+            return "approve_supplier_compensation";
+        }
+        throw new BizException(ResultCode.VALIDATION_ERROR, "当前订单阶段不支持该仲裁裁定动作");
+    }
+
+    private boolean shouldRunFinalSettlement(DisputeEntity dispute) {
+        return "wait_review".equals(dispute.getApplyStage()) && "supplier".equals(dispute.getApplicantRole());
+    }
+
+    private int resolveDecisionAmount(RentalOrderEntity order, String actionType, Integer decisionAmountFen) {
+        if ("reject".equals(actionType)) {
+            return 0;
+        }
+        if (decisionAmountFen == null) {
+            throw new BizException(ResultCode.VALIDATION_ERROR, "裁定金额不能为空");
+        }
+        if (decisionAmountFen <= 0) {
+            throw new BizException(ResultCode.VALIDATION_ERROR, "同意补偿时裁定金额必须大于 0");
+        }
+        int amountFen = decisionAmountFen;
+        if ("approve_demander_compensation".equals(actionType) && amountFen > positive(order.getRentAmountFen())) {
+            throw new BizException(ResultCode.VALIDATION_ERROR, "用户补偿金额不能超过订单租金");
+        }
+        if ("approve_supplier_compensation".equals(actionType) && amountFen > positive(order.getDepositAmountFen())) {
+            throw new BizException(ResultCode.VALIDATION_ERROR, "工厂补偿金额不能超过订单押金");
+        }
+        return amountFen;
+    }
+
+    private int positive(Integer value) {
+        return value == null || value < 0 ? 0 : value;
+    }
+
+    private void recordDisputeDecisionAction(RentalOrderEntity order,
+                                             DisputeEntity dispute,
+                                             String actionType,
+                                             Integer amountFen,
+                                             String reason) {
+        OrderAdminActionEntity action = new OrderAdminActionEntity();
+        action.setOrderId(order.getId());
+        action.setDisputeId(dispute.getId());
+        action.setActionType("dispute_decision");
+        action.setActionStatus("done");
+        action.setBeforeOrderStatus(order.getOrderStatus());
+        action.setAfterOrderStatus(shouldRunFinalSettlement(dispute) ? "completed" : order.getOrderStatus());
+        action.setBeforePayStatus(order.getPayStatus());
+        action.setAfterPayStatus(order.getPayStatus());
+        action.setAmountFen(amountFen);
+        action.setTargetRole(dispute.getApplicantRole());
+        action.setTargetUserId(dispute.getApplyUserId());
+        action.setScoreDelta(0);
+        action.setReason(reason);
+        action.setInternalNote(actionType);
+        action.setOperatorUserId(userApplicationService.resolveAdminUserId());
+        orderAdminActionMapper.insert(action);
+    }
+
+    private void recordGlobalAdminAction(String actionType,
+                                         String targetRole,
+                                         Long targetUserId,
+                                         String reason,
+                                         String internalNote) {
+        OrderAdminActionEntity action = new OrderAdminActionEntity();
+        action.setOrderId(null);
+        action.setDisputeId(null);
+        action.setActionType(actionType);
+        action.setActionStatus("done");
+        action.setTargetRole(targetRole);
+        action.setTargetUserId(targetUserId);
+        action.setScoreDelta(0);
+        action.setReason(reason);
+        action.setInternalNote(internalNote);
+        action.setOperatorUserId(userApplicationService.resolveAdminUserId());
+        orderAdminActionMapper.insert(action);
+    }
+
+    private String safe(String value) {
+        return value == null ? "" : value.replace("\n", " ").replace("\r", " ").trim();
     }
 
     private void requireAdminRole() {

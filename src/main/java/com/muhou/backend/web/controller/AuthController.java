@@ -2,6 +2,7 @@ package com.muhou.backend.web.controller;
 
 import com.muhou.backend.application.service.AuthApplicationService;
 import com.muhou.backend.common.api.ApiResponse;
+import com.muhou.backend.web.request.AdminLoginRequest;
 import com.muhou.backend.web.request.AuthLoginRequest;
 import com.muhou.backend.web.request.DemoLoginRequest;
 import com.muhou.backend.web.response.AuthLoginResponse;
@@ -38,5 +39,10 @@ public class AuthController {
     @PostMapping("/demo-login")
     public ApiResponse<AuthLoginResponse> demoLogin(@Valid @RequestBody DemoLoginRequest request) {
         return ApiResponse.success(authApplicationService.demoLogin(request.getAccountKey(), request.getRole(), Boolean.TRUE.equals(request.getResetDemo())));
+    }
+
+    @PostMapping("/admin-login")
+    public ApiResponse<AuthLoginResponse> adminLogin(@Valid @RequestBody AdminLoginRequest request) {
+        return ApiResponse.success(authApplicationService.adminLogin(request.getUsername(), request.getPassword()));
     }
 }

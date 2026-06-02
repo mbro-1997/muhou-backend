@@ -13,16 +13,25 @@ import com.muhou.backend.infrastructure.persistence.entity.OrderPaymentEntity;
 import com.muhou.backend.infrastructure.persistence.entity.PaymentOrderLinkEntity;
 import com.muhou.backend.infrastructure.persistence.entity.OrderReviewEntity;
 import com.muhou.backend.infrastructure.persistence.entity.ProjectSchemeEntity;
+import com.muhou.backend.infrastructure.persistence.entity.ProjectSchemeItemEntity;
 import com.muhou.backend.infrastructure.persistence.entity.PropEntity;
+import com.muhou.backend.infrastructure.persistence.entity.PropInstanceEntity;
+import com.muhou.backend.infrastructure.persistence.entity.OrderItemInstanceEntity;
 import com.muhou.backend.infrastructure.persistence.entity.RentalOrderEntity;
 import com.muhou.backend.infrastructure.persistence.entity.RentalOrderItemEntity;
 import com.muhou.backend.infrastructure.persistence.entity.UserEntity;
 import com.muhou.backend.infrastructure.persistence.entity.DisputeEntity;
+import com.muhou.backend.infrastructure.persistence.entity.DisputeReasonConfigEntity;
+import com.muhou.backend.infrastructure.persistence.entity.OrderAdminActionEntity;
+import com.muhou.backend.infrastructure.persistence.mapper.DisputeReasonConfigMapper;
 import com.muhou.backend.infrastructure.persistence.mapper.DisputeMapper;
+import com.muhou.backend.infrastructure.persistence.mapper.OrderAdminActionMapper;
+import com.muhou.backend.infrastructure.persistence.mapper.OrderItemInstanceMapper;
 import com.muhou.backend.infrastructure.persistence.mapper.OrderPaymentMapper;
 import com.muhou.backend.infrastructure.persistence.mapper.PaymentOrderLinkMapper;
 import com.muhou.backend.infrastructure.persistence.mapper.OrderReviewMapper;
 import com.muhou.backend.infrastructure.persistence.mapper.ProjectSchemeItemMapper;
+import com.muhou.backend.infrastructure.persistence.mapper.PropInstanceMapper;
 import com.muhou.backend.infrastructure.persistence.mapper.PropMapper;
 import com.muhou.backend.infrastructure.persistence.mapper.PropQrCodeMapper;
 import com.muhou.backend.infrastructure.persistence.mapper.RentalOrderItemMapper;
@@ -58,12 +67,16 @@ public class OrderApplicationService {
 
     private final RentalOrderMapper rentalOrderMapper;
     private final RentalOrderItemMapper rentalOrderItemMapper;
+    private final OrderItemInstanceMapper orderItemInstanceMapper;
     private final OrderPaymentMapper orderPaymentMapper;
     private final PaymentOrderLinkMapper paymentOrderLinkMapper;
     private final OrderReviewMapper orderReviewMapper;
     private final OrderScanLogApplicationService orderScanLogApplicationService;
     private final DisputeMapper disputeMapper;
+    private final DisputeReasonConfigMapper disputeReasonConfigMapper;
+    private final OrderAdminActionMapper orderAdminActionMapper;
     private final ProjectSchemeItemMapper projectSchemeItemMapper;
+    private final PropInstanceMapper propInstanceMapper;
     private final PropMapper propMapper;
     private final PropQrCodeMapper propQrCodeMapper;
     private final UserMapper userMapper;
@@ -76,12 +89,16 @@ public class OrderApplicationService {
 
     public OrderApplicationService(RentalOrderMapper rentalOrderMapper,
                                    RentalOrderItemMapper rentalOrderItemMapper,
+                                   OrderItemInstanceMapper orderItemInstanceMapper,
                                    OrderPaymentMapper orderPaymentMapper,
                                    PaymentOrderLinkMapper paymentOrderLinkMapper,
                                    OrderReviewMapper orderReviewMapper,
                                    OrderScanLogApplicationService orderScanLogApplicationService,
                                    DisputeMapper disputeMapper,
+                                   DisputeReasonConfigMapper disputeReasonConfigMapper,
+                                   OrderAdminActionMapper orderAdminActionMapper,
                                    ProjectSchemeItemMapper projectSchemeItemMapper,
+                                   PropInstanceMapper propInstanceMapper,
                                    PropMapper propMapper,
                                    PropQrCodeMapper propQrCodeMapper,
                                    UserMapper userMapper,
@@ -93,12 +110,16 @@ public class OrderApplicationService {
                                    CurrentUserSupport currentUserSupport) {
         this.rentalOrderMapper = rentalOrderMapper;
         this.rentalOrderItemMapper = rentalOrderItemMapper;
+        this.orderItemInstanceMapper = orderItemInstanceMapper;
         this.orderPaymentMapper = orderPaymentMapper;
         this.paymentOrderLinkMapper = paymentOrderLinkMapper;
         this.orderReviewMapper = orderReviewMapper;
         this.orderScanLogApplicationService = orderScanLogApplicationService;
         this.disputeMapper = disputeMapper;
+        this.disputeReasonConfigMapper = disputeReasonConfigMapper;
+        this.orderAdminActionMapper = orderAdminActionMapper;
         this.projectSchemeItemMapper = projectSchemeItemMapper;
+        this.propInstanceMapper = propInstanceMapper;
         this.propMapper = propMapper;
         this.propQrCodeMapper = propQrCodeMapper;
         this.userMapper = userMapper;
@@ -129,11 +150,14 @@ public class OrderApplicationService {
         RentalOrderEntity order = getAccessibleOrder(orderId);
         String currentRole = requireCurrentRole();
         Long currentUserId = currentUserSupport.requireCurrentUserId();
-        if (!List.of("wait_pickup", "renting", "wait_review").contains(order.getOrderStatus())) {
+        if (!canRoleApplyDisputeAtStage(order.getOrderStatus(), currentRole)) {
             throw new BizException(ResultCode.CONFLICT, "当前订单节点不能发起仲裁");
         }
-        if (disputeMapper.countByOrderAndApplicant(orderId, currentUserId, currentRole) > 0) {
+        if (disputeMapper.countPendingByOrderId(orderId) > 0) {
             throw new BizException(ResultCode.CONFLICT, "当前订单当前角色已经申请过仲裁，不能重复申请");
+        }
+        if (disputeMapper.countByOrderStageAndRole(orderId, order.getOrderStatus(), currentRole) > 0) {
+            throw new BizException(ResultCode.CONFLICT, "当前订单当前阶段已发起过仲裁，不能重复申请");
         }
         int claimAmountFen = yuanToFen(request.getClaimAmount());
         int maxClaimFen = "supplier".equals(currentRole)
@@ -144,11 +168,14 @@ public class OrderApplicationService {
                 "supplier".equals(currentRole) ? "工厂向用户索赔金额不能超过押金" : "用户向工厂索赔金额不能超过实际费用");
         }
 
+        DisputeReasonConfigEntity reasonConfig = resolveDisputeReason(order.getOrderStatus(), currentRole, request.getReasonCode());
         DisputeEntity entity = new DisputeEntity();
         entity.setOrderId(orderId);
         entity.setApplyUserId(currentUserId);
         entity.setApplicantRole(currentRole);
         entity.setApplyStage(order.getOrderStatus());
+        entity.setReasonCode(reasonConfig.getReasonCode());
+        entity.setReasonLabel(reasonConfig.getReasonLabel());
         entity.setTitle("订单仲裁申请-" + order.getOrderNo());
         entity.setContent(normalizeRequiredText(request.getReason(), "仲裁原因不能为空"));
         entity.setClaimAmountFen(claimAmountFen);
@@ -156,84 +183,10 @@ public class OrderApplicationService {
         entity.setOrderStatusSnapshot(order.getOrderStatus());
         entity.setDemanderUserId(order.getDemanderUserId());
         entity.setSupplierUserId(order.getSupplierUserId());
-        entity.setEvidenceUrls(normalizeOptionalText(request.getEvidenceUrls()));
+        entity.setEvidenceUrls(normalizeEvidenceUrls(request.getEvidenceUrls()));
         entity.setDisputeStatus("pending");
         disputeMapper.insert(entity);
         return getOrder(orderId);
-    }
-
-    @Transactional
-    public OrderResponse createOrder(CreateOrderRequest request) {
-        Long demanderUserId = currentDemanderUserId();
-        ProjectSchemeEntity project = projectApplicationService.getOwnedProject(request.getProjectId());
-        if (!"editing".equals(project.getProjectStatus())) {
-            throw new BizException(ResultCode.CONFLICT, "当前方案已下单，不能重复创建订单");
-        }
-
-        List<Long> propIds = projectSchemeItemMapper.selectPropIdsByProjectId(project.getId());
-        if (propIds.isEmpty()) {
-            throw new BizException(ResultCode.CONFLICT, "方案中没有可下单的道具");
-        }
-
-        List<PropEntity> props = propMapper.selectByIds(propIds);
-        List<String> blocked = props.stream()
-            .filter(item -> !StatusTextHelper.isPropOrderable(item.getPropStatus()))
-            .map(PropEntity::getPropName)
-            .toList();
-        if (!blocked.isEmpty()) {
-            throw new BizException(ResultCode.CONFLICT, "以下道具当前不可下单: " + String.join("、", blocked));
-        }
-
-        Long supplierUserId = ensureSingleSupplier(props);
-        LocalDate rentalStartDate = request.getRentalStartDate();
-        LocalDate rentalEndDate = request.getRentalEndDate();
-        int rentalDays = calculateRentalDays(rentalStartDate, rentalEndDate);
-        int dailyRentAmountFen = props.stream().mapToInt(item -> defaultZero(item.getDailyRentPriceFen())).sum();
-        long rentAmountFenLong = (long) dailyRentAmountFen * rentalDays;
-        if (rentAmountFenLong > Integer.MAX_VALUE) {
-            throw new BizException(ResultCode.VALIDATION_ERROR, "租赁金额超出系统限制");
-        }
-        int rentAmountFen = (int) rentAmountFenLong;
-        int depositAmountFen = props.stream().mapToInt(item -> defaultZero(item.getDepositAmountFen())).sum();
-
-        RentalOrderEntity order = new RentalOrderEntity();
-        order.setOrderNo("ORD-" + System.currentTimeMillis());
-        order.setProjectId(project.getId());
-        order.setDemanderUserId(demanderUserId);
-        order.setSupplierUserId(supplierUserId);
-        order.setOrderStatus("pending_factory_confirm");
-        order.setRentalDays(rentalDays);
-        order.setRentalStartDate(rentalStartDate);
-        order.setRentalEndDate(rentalEndDate);
-        order.setContactAddress(normalizeRequiredText(request.getContactAddress(), "使用地址不能为空"));
-        order.setUseScene(normalizeRequiredText(request.getUseScene(), "使用场景不能为空"));
-        order.setSpecialRemark(normalizeOptionalText(request.getSpecialRemark()));
-        order.setRentAmountFen(rentAmountFen);
-        order.setDepositAmountFen(depositAmountFen);
-        order.setTotalAmountFen(rentAmountFen + depositAmountFen);
-        order.setPayStatus("unpaid");
-        order.setRefundStatus("none");
-        order.setTotalPaidFen(0);
-        order.setTotalRefundedFen(0);
-        order.setConfirmDeadlineAt(LocalDateTime.now().plusHours(1));
-        order.setRemark("由前端方案提交生成");
-        order.setCreatedBy(demanderUserId);
-        rentalOrderMapper.insert(order);
-
-        List<RentalOrderItemEntity> orderItems = props.stream().map(prop -> {
-            RentalOrderItemEntity item = new RentalOrderItemEntity();
-            item.setOrderId(order.getId());
-            item.setPropId(prop.getId());
-            item.setPropNameSnapshot(prop.getPropName());
-            item.setImageUrlSnapshot(prop.getImageUrl());
-            item.setDailyRentPriceFenSnapshot(prop.getDailyRentPriceFen());
-            item.setDepositAmountFenSnapshot(prop.getDepositAmountFen());
-            item.setOutboundStatus("pending");
-            item.setReturnStatus("pending");
-            return item;
-        }).collect(Collectors.toList());
-        rentalOrderItemMapper.batchInsert(orderItems);
-        return getOrder(order.getId());
     }
 
     @Transactional
@@ -244,14 +197,17 @@ public class OrderApplicationService {
             throw new BizException(ResultCode.CONFLICT, "该方案已下单，不能重复提交");
         }
 
-        List<Long> propIds = projectSchemeItemMapper.selectPropIdsByProjectId(project.getId());
+        List<ProjectSchemeItemEntity> checkoutSchemeItems = projectSchemeItemMapper.selectByProjectId(project.getId());
+        List<Long> propIds = checkoutSchemeItems.stream().map(ProjectSchemeItemEntity::getPropId).toList();
         if (propIds.isEmpty()) {
             throw new BizException(ResultCode.CONFLICT, "方案中没有可下单的道具");
         }
+        Map<Long, Integer> checkoutQuantityByPropId = checkoutSchemeItems.stream()
+            .collect(Collectors.toMap(ProjectSchemeItemEntity::getPropId, item -> normalizeQuantity(item.getQuantity()), (a, b) -> a, LinkedHashMap::new));
 
         List<PropEntity> props = propMapper.selectByIds(propIds);
         List<String> blocked = props.stream()
-            .filter(item -> !StatusTextHelper.isPropOrderable(item.getPropStatus()))
+            .filter(item -> !isPropOrderableWithStock(item, checkoutQuantityByPropId.getOrDefault(item.getId(), 1)))
             .map(PropEntity::getPropName)
             .toList();
         if (!blocked.isEmpty()) {
@@ -279,6 +235,7 @@ public class OrderApplicationService {
                 demanderUserId,
                 entry.getKey(),
                 entry.getValue(),
+                checkoutQuantityByPropId,
                 rentalStartDate,
                 rentalEndDate,
                 rentalDays,
@@ -287,7 +244,7 @@ public class OrderApplicationService {
                 index++
             );
             rentalOrderMapper.insert(order);
-            rentalOrderItemMapper.batchInsert(buildOrderItems(order.getId(), entry.getValue()));
+            rentalOrderItemMapper.batchInsert(buildOrderItems(order.getId(), entry.getValue(), checkoutQuantityByPropId));
             orders.add(order);
             totalAmountFen += defaultZero(order.getTotalAmountFen());
         }
@@ -317,9 +274,7 @@ public class OrderApplicationService {
         for (RentalOrderEntity order : orders) {
             rentalOrderMapper.markPaid(order.getId(), payment.getId(), "paid", order.getTotalAmountFen(), now);
             List<RentalOrderItemEntity> items = rentalOrderItemMapper.selectByOrderId(order.getId());
-            for (RentalOrderItemEntity item : items) {
-                propMapper.updateStatus(item.getPropId(), "locked");
-            }
+            reserveStockForOrder(order.getId(), items);
         }
         projectApplicationService.markProjectOrdered(project.getId());
 
@@ -366,9 +321,7 @@ public class OrderApplicationService {
         rentalOrderMapper.markPaid(orderId, payment.getId(), "paid", order.getTotalAmountFen(), now);
 
         List<RentalOrderItemEntity> items = rentalOrderItemMapper.selectByOrderId(orderId);
-        for (RentalOrderItemEntity item : items) {
-            propMapper.updateStatus(item.getPropId(), "locked");
-        }
+        reserveStockForOrder(orderId, items);
         projectApplicationService.markProjectOrdered(order.getProjectId());
 
         PayResponse response = buildPayResponse(payment, payResult, orderId);
@@ -392,10 +345,6 @@ public class OrderApplicationService {
             throw new BizException(ResultCode.CONFLICT, "订单已超时取消，不能再确认");
         }
         rentalOrderMapper.markFactoryConfirmed(orderId, LocalDateTime.now());
-        List<RentalOrderItemEntity> items = rentalOrderItemMapper.selectByOrderId(orderId);
-        for (RentalOrderItemEntity item : items) {
-            propMapper.updateStatus(item.getPropId(), "renting");
-        }
         return getOrder(orderId);
     }
 
@@ -414,16 +363,61 @@ public class OrderApplicationService {
         }
         int updated = rentalOrderMapper.markFactoryRejected(orderId, LocalDateTime.now(), reason);
         if (updated > 0) {
-            paymentOrderLinkMapper.addRefundAmount(order.getId(), defaultZero(order.getTotalAmountFen()));
-            rentalOrderMapper.updateSettlementSummary(order.getId(), "refunded", defaultZero(order.getTotalAmountFen()));
+            orderSettlementApplicationService.recordCancellationSettlement(order, defaultZero(order.getTotalAmountFen()), 0, reason);
         }
         if (updated <= 0) {
             throw new BizException(ResultCode.CONFLICT, "订单状态已变化，不能重复驳回");
         }
-        List<RentalOrderItemEntity> items = rentalOrderItemMapper.selectByOrderId(orderId);
-        for (RentalOrderItemEntity item : items) {
-            propMapper.updateStatus(item.getPropId(), "idle");
+        propInstanceMapper.releaseLockedByOrderId(orderId);
+        return getOrder(orderId);
+    }
+
+    @Transactional
+    public OrderResponse cancelOrderByDemander(Long orderId) {
+        RentalOrderEntity order = getAccessibleOrder(orderId);
+        if (!"demander".equals(requireCurrentRole()) || !currentUserSupport.requireCurrentUserId().equals(order.getDemanderUserId())) {
+            throw new BizException(ResultCode.FORBIDDEN, "当前用户无权取消该订单");
         }
+        if (!List.of("pending_factory_confirm", "wait_pickup").contains(order.getOrderStatus())) {
+            throw new BizException(ResultCode.CONFLICT, "当前订单已出库或已结束，不能直接取消");
+        }
+        ensureNoOutboundScanned(orderId);
+        int retainedFeeFen = calculatePreOutboundCancelFee(order);
+        int totalFen = defaultZero(order.getTotalAmountFen());
+        int refundFen = Math.max(0, totalFen - retainedFeeFen);
+        int updated = rentalOrderMapper.markManualCancelled(
+            orderId,
+            LocalDateTime.now(),
+            "租赁方出库前取消订单",
+            "user_cancel_before_outbound"
+        );
+        if (updated <= 0) {
+            throw new BizException(ResultCode.CONFLICT, "订单状态已变化，不能取消");
+        }
+        propInstanceMapper.releaseLockedByOrderId(orderId);
+        orderSettlementApplicationService.recordCancellationSettlement(order, refundFen, retainedFeeFen, "租赁方出库前取消订单");
+        return getOrder(orderId);
+    }
+
+    @Transactional
+    public OrderResponse cancelAfterConfirmByFactory(Long orderId) {
+        RentalOrderEntity order = getSupplierOwnedOrder(orderId);
+        if (!"wait_pickup".equals(order.getOrderStatus())) {
+            throw new BizException(ResultCode.CONFLICT, "只有已确认待出库的订单可以申请取消");
+        }
+        ensureNoOutboundScanned(orderId);
+        int updated = rentalOrderMapper.markManualCancelled(
+            orderId,
+            LocalDateTime.now(),
+            "工厂接单后取消",
+            "supplier_cancel_after_confirm"
+        );
+        if (updated <= 0) {
+            throw new BizException(ResultCode.CONFLICT, "订单状态已变化，不能取消");
+        }
+        propInstanceMapper.releaseLockedByOrderId(orderId);
+        orderSettlementApplicationService.recordCancellationSettlement(order, defaultZero(order.getTotalAmountFen()), 0, "工厂接单后取消");
+        recordOrderAdminAction(order, null, "supplier_cancel_after_confirm", 0, "supplier", order.getSupplierUserId(), 0, "工厂接单后取消", "工厂接单后无法履约，第一版仅记录不扣分", order.getOrderStatus(), "cancelled_manual");
         return getOrder(orderId);
     }
 
@@ -442,24 +436,33 @@ public class OrderApplicationService {
         if (!"wait_pickup".equals(order.getOrderStatus())) {
             throw new BizException(ResultCode.CONFLICT, "当前订单状态不能扫码出库");
         }
-        int total = rentalOrderItemMapper.countByOrderId(orderId);
-        int outboundScanned = rentalOrderItemMapper.countOutboundScannedByOrderId(orderId);
+        int total = orderItemInstanceMapper.countByOrderId(orderId);
+        int outboundScanned = orderItemInstanceMapper.countOutboundScannedByOrderId(orderId);
         if (total > 0 && outboundScanned >= total) {
             throw new BizException(ResultCode.CONFLICT, "该订单已完成全部出库扫码，不能重复出库");
         }
-        RentalOrderItemEntity item = requireOrderItem(orderId, propId);
-        PropEntity prop = requireOrderScanProp(order, propId);
-        if (!"renting".equals(prop.getPropStatus())) {
+        PropInstanceEntity instance = resolveOrderScanInstance(order, propId, qrCodeId, "outbound");
+        RentalOrderItemEntity item = requireOrderItem(orderId, instance.getPropId());
+        OrderItemInstanceEntity boundInstance = requireBoundOrderInstance(orderId, instance.getId());
+        PropEntity prop = requireOrderScanProp(order, instance.getPropId());
+        if (!"locked".equals(instance.getInstanceStatus())) {
             throw new BizException(ResultCode.CONFLICT, "该道具当前不是待出库状态，不能出库");
         }
-        if ("scanned".equals(item.getOutboundStatus())) {
+        if (!orderId.equals(instance.getCurrentOrderId())) {
+            throw new BizException(ResultCode.FORBIDDEN, "扫描的实物不属于当前订单");
+        }
+        if ("scanned".equals(boundInstance.getOutboundStatus())) {
             throw new BizException(ResultCode.CONFLICT, "该道具已经完成出库扫码");
         }
-        rentalOrderItemMapper.markOutboundScanned(orderId, propId, LocalDateTime.now());
-        orderScanLogApplicationService.logSuccess(order.getId(), item.getId(), prop.getId(), firstNonBlank(qrCodeId, prop.getQrCodeId()), "outbound", order.getSupplierUserId(), rawScanResult);
-        outboundScanned = rentalOrderItemMapper.countOutboundScannedByOrderId(orderId);
+        LocalDateTime now = LocalDateTime.now();
+        if (propInstanceMapper.markRenting(instance.getId(), orderId) <= 0) {
+            throw new BizException(ResultCode.CONFLICT, "实物状态已变化，不能出库");
+        }
+        orderItemInstanceMapper.markOutboundScanned(boundInstance.getId(), now);
+        orderScanLogApplicationService.logSuccess(order.getId(), item.getId(), prop.getId(), firstNonBlank(qrCodeId, instance.getQrCodeId()), "outbound", order.getSupplierUserId(), rawScanResult);
+        outboundScanned = orderItemInstanceMapper.countOutboundScannedByOrderId(orderId);
         if (total > 0 && total == outboundScanned) {
-            rentalOrderMapper.markPickedUp(orderId, LocalDateTime.now());
+            rentalOrderMapper.markPickedUp(orderId, now);
         }
         return getOrder(orderId);
     }
@@ -479,32 +482,40 @@ public class OrderApplicationService {
         if (!"renting".equals(order.getOrderStatus())) {
             throw new BizException(ResultCode.CONFLICT, "当前订单状态不能扫码归还");
         }
-        int total = rentalOrderItemMapper.countByOrderId(orderId);
-        int outboundScanned = rentalOrderItemMapper.countOutboundScannedByOrderId(orderId);
+        int total = orderItemInstanceMapper.countByOrderId(orderId);
+        int outboundScanned = orderItemInstanceMapper.countOutboundScannedByOrderId(orderId);
         if (total <= 0 || outboundScanned < total) {
             throw new BizException(ResultCode.CONFLICT, "订单道具尚未全部出库，不能开始归还扫码");
         }
-        int returnScanned = rentalOrderItemMapper.countReturnScannedByOrderId(orderId);
+        int returnScanned = orderItemInstanceMapper.countReturnScannedByOrderId(orderId);
         if (returnScanned >= total) {
             throw new BizException(ResultCode.CONFLICT, "该订单已完成全部归还扫码，不能重复归还");
         }
-        RentalOrderItemEntity item = requireOrderItem(orderId, propId);
-        PropEntity prop = requireOrderScanProp(order, propId);
-        if (!"renting".equals(prop.getPropStatus())) {
+        PropInstanceEntity instance = resolveOrderScanInstance(order, propId, qrCodeId, "return");
+        RentalOrderItemEntity item = requireOrderItem(orderId, instance.getPropId());
+        OrderItemInstanceEntity boundInstance = requireBoundOrderInstance(orderId, instance.getId());
+        PropEntity prop = requireOrderScanProp(order, instance.getPropId());
+        if (!"renting".equals(instance.getInstanceStatus())) {
             throw new BizException(ResultCode.CONFLICT, "该道具当前不是借出状态，不能归还");
         }
-        if (!"scanned".equals(item.getOutboundStatus())) {
+        if (!orderId.equals(instance.getCurrentOrderId())) {
+            throw new BizException(ResultCode.FORBIDDEN, "扫描的实物不属于当前订单");
+        }
+        if (!"scanned".equals(boundInstance.getOutboundStatus())) {
             throw new BizException(ResultCode.CONFLICT, "该道具尚未完成出库，不能直接归还");
         }
-        if ("scanned".equals(item.getReturnStatus())) {
+        if ("scanned".equals(boundInstance.getReturnStatus())) {
             throw new BizException(ResultCode.CONFLICT, "该道具已经完成归还扫码");
         }
-        rentalOrderItemMapper.markReturnScanned(orderId, propId, LocalDateTime.now());
-        orderScanLogApplicationService.logSuccess(order.getId(), item.getId(), prop.getId(), firstNonBlank(qrCodeId, prop.getQrCodeId()), "return", order.getSupplierUserId(), rawScanResult);
-        propMapper.updateStatus(propId, "idle");
-        returnScanned = rentalOrderItemMapper.countReturnScannedByOrderId(orderId);
+        LocalDateTime now = LocalDateTime.now();
+        orderItemInstanceMapper.markReturnScanned(boundInstance.getId(), now);
+        if (propInstanceMapper.markIdleReturned(instance.getId(), orderId) <= 0) {
+            throw new BizException(ResultCode.CONFLICT, "实物状态已变化，不能归还");
+        }
+        orderScanLogApplicationService.logSuccess(order.getId(), item.getId(), prop.getId(), firstNonBlank(qrCodeId, instance.getQrCodeId()), "return", order.getSupplierUserId(), rawScanResult);
+        returnScanned = orderItemInstanceMapper.countReturnScannedByOrderId(orderId);
         if (total > 0 && total == returnScanned) {
-            rentalOrderMapper.markReturned(orderId, LocalDateTime.now());
+            rentalOrderMapper.markReturned(orderId, now);
         }
         return getOrder(orderId);
     }
@@ -603,10 +614,88 @@ public class OrderApplicationService {
         if (updated <= 0) {
             return 0;
         }
-        for (RentalOrderItemEntity item : rentalOrderItemMapper.selectByOrderId(order.getId())) {
-            propMapper.updateStatus(item.getPropId(), "idle");
-        }
+        propInstanceMapper.releaseLockedByOrderId(order.getId());
+        orderSettlementApplicationService.recordCancellationSettlement(order, defaultZero(order.getTotalAmountFen()), 0, cancelReason);
         return updated;
+    }
+
+    private void ensureNoOutboundScanned(Long orderId) {
+        if (orderItemInstanceMapper.countOutboundScannedByOrderId(orderId) > 0) {
+            throw new BizException(ResultCode.CONFLICT, "订单已有出库扫码记录，不能直接取消");
+        }
+    }
+
+    private int calculatePreOutboundCancelFee(RentalOrderEntity order) {
+        int rentFen = defaultZero(order.getRentAmountFen());
+        if (rentFen <= 0 || order.getRentalStartDate() == null) {
+            return 0;
+        }
+        long hours = ChronoUnit.HOURS.between(LocalDateTime.now(), order.getRentalStartDate().atStartOfDay());
+        if (hours >= 48) {
+            return 0;
+        }
+        if (hours >= 24) {
+            return (int) Math.round(rentFen * 0.30d);
+        }
+        return (int) Math.round(rentFen * 0.60d);
+    }
+
+    private void recordOrderAdminAction(RentalOrderEntity order,
+                                        Long disputeId,
+                                        String actionType,
+                                        Integer amountFen,
+                                        String targetRole,
+                                        Long targetUserId,
+                                        Integer scoreDelta,
+                                        String reason,
+                                        String internalNote,
+                                        String beforeOrderStatus,
+                                        String afterOrderStatus) {
+        OrderAdminActionEntity action = new OrderAdminActionEntity();
+        action.setOrderId(order.getId());
+        action.setDisputeId(disputeId);
+        action.setActionType(actionType);
+        action.setActionStatus("done");
+        action.setBeforeOrderStatus(beforeOrderStatus);
+        action.setAfterOrderStatus(afterOrderStatus);
+        action.setBeforePayStatus(order.getPayStatus());
+        action.setAfterPayStatus(order.getPayStatus());
+        action.setAmountFen(amountFen);
+        action.setTargetRole(targetRole);
+        action.setTargetUserId(targetUserId);
+        action.setScoreDelta(scoreDelta);
+        action.setReason(reason);
+        action.setInternalNote(internalNote);
+        action.setOperatorUserId(currentUserSupport.requireCurrentUserId());
+        orderAdminActionMapper.insert(action);
+    }
+
+    private void reserveStockForOrder(Long orderId, List<RentalOrderItemEntity> items) {
+        List<OrderItemInstanceEntity> boundInstances = new ArrayList<>();
+        for (RentalOrderItemEntity item : items) {
+            int quantity = normalizeQuantity(item.getQuantity());
+            List<Long> instanceIds = propInstanceMapper.selectIdleIdsForUpdate(item.getPropId(), quantity);
+            if (instanceIds.size() < quantity) {
+                throw new BizException(ResultCode.CONFLICT, "道具库存不足");
+            }
+            int locked = propInstanceMapper.lockInstances(instanceIds, orderId);
+            if (locked != quantity) {
+                throw new BizException(ResultCode.CONFLICT, "道具库存已变化，请重新提交订单");
+            }
+            for (Long instanceId : instanceIds) {
+                OrderItemInstanceEntity bound = new OrderItemInstanceEntity();
+                bound.setOrderId(orderId);
+                bound.setOrderItemId(item.getId());
+                bound.setPropId(item.getPropId());
+                bound.setPropInstanceId(instanceId);
+                bound.setOutboundStatus("pending");
+                bound.setReturnStatus("pending");
+                boundInstances.add(bound);
+            }
+        }
+        if (!boundInstances.isEmpty()) {
+            orderItemInstanceMapper.batchInsert(boundInstances);
+        }
     }
 
     private int insertDefaultReviewIfMissing(RentalOrderEntity order, String reviewerRole, Long reviewerUserId) {
@@ -632,7 +721,7 @@ public class OrderApplicationService {
                 return;
             }
             rentalOrderMapper.markReviewed(orderId, LocalDateTime.now());
-            orderSettlementApplicationService.settleNormalOrder(getOrderEntity(orderId));
+            orderSettlementApplicationService.settleFinalOrder(getOrderEntity(orderId), disputeMapper.selectByOrderId(orderId));
         }
     }
 
@@ -689,11 +778,49 @@ public class OrderApplicationService {
         if (qrCodeId == null || qrCodeId.isBlank()) {
             throw new BizException(ResultCode.VALIDATION_ERROR, "扫码结果未识别到二维码标识");
         }
-        var qrCode = propQrCodeMapper.selectByQrCodeId(qrCodeId);
-        if (qrCode == null || "revoked".equals(qrCode.getStatus())) {
+        PropInstanceEntity instance = propInstanceMapper.selectByQrCodeId(qrCodeId);
+        if (instance == null) {
             throw new BizException(ResultCode.NOT_FOUND, "二维码不存在或已作废");
         }
-        return qrCode.getPropId();
+        return instance.getPropId();
+    }
+
+    private PropInstanceEntity resolveOrderScanInstance(RentalOrderEntity order, Long propId, String qrCodeId, String scanType) {
+        PropInstanceEntity instance;
+        if (qrCodeId != null && !qrCodeId.isBlank()) {
+            instance = propInstanceMapper.selectByQrCodeId(qrCodeId);
+            if (instance == null) {
+                throw new BizException(ResultCode.NOT_FOUND, "二维码未绑定实物，不能操作订单扫码");
+            }
+        } else {
+            if (propId == null) {
+                throw new BizException(ResultCode.VALIDATION_ERROR, "扫码结果未识别到道具");
+            }
+            List<OrderItemInstanceEntity> candidates = orderItemInstanceMapper.selectByOrderIdAndPropId(order.getId(), propId);
+            instance = candidates.stream()
+                .filter(item -> "outbound".equals(scanType)
+                    ? "pending".equals(item.getOutboundStatus())
+                    : "pending".equals(item.getReturnStatus()))
+                .map(item -> propInstanceMapper.selectById(item.getPropInstanceId()))
+                .filter(item -> item != null)
+                .findFirst()
+                .orElse(null);
+            if (instance == null) {
+                throw new BizException(ResultCode.NOT_FOUND, "当前订单没有可扫码的该道具实物");
+            }
+        }
+        if (instance.getCurrentOrderId() == null || !instance.getCurrentOrderId().equals(order.getId())) {
+            throw new BizException(ResultCode.FORBIDDEN, "扫描的实物不属于当前订单");
+        }
+        return instance;
+    }
+
+    private OrderItemInstanceEntity requireBoundOrderInstance(Long orderId, Long propInstanceId) {
+        OrderItemInstanceEntity entity = orderItemInstanceMapper.selectByOrderIdAndInstanceId(orderId, propInstanceId);
+        if (entity == null) {
+            throw new BizException(ResultCode.NOT_FOUND, "扫描的实物不在当前订单中");
+        }
+        return entity;
     }
 
     private PropEntity requireOrderScanProp(RentalOrderEntity order, Long propId) {
@@ -764,6 +891,11 @@ public class OrderApplicationService {
                 itemResponse.setTransportSuggestion(base.getTransportSuggestion());
                 itemResponse.setStatus(base.getStatus());
                 itemResponse.setStatusText(base.getStatusText());
+                itemResponse.setTotalStock(base.getTotalStock());
+                itemResponse.setAvailableStock(base.getAvailableStock());
+                itemResponse.setLockedStock(base.getLockedStock());
+                itemResponse.setRentedStock(base.getRentedStock());
+                itemResponse.setCanRent(base.isCanRent());
             } else {
                 itemResponse.setId(itemEntity.getPropId());
                 itemResponse.setName(itemEntity.getPropNameSnapshot());
@@ -772,8 +904,14 @@ public class OrderApplicationService {
                 itemResponse.setPrice(MoneyUtils.fenToYuan(itemEntity.getDailyRentPriceFenSnapshot()));
                 itemResponse.setDeposit(MoneyUtils.fenToYuan(itemEntity.getDepositAmountFenSnapshot()));
             }
-            itemResponse.setOutboundScanned("scanned".equals(itemEntity.getOutboundStatus()));
-            itemResponse.setReturnScanned("scanned".equals(itemEntity.getReturnStatus()));
+            int quantity = normalizeQuantity(itemEntity.getQuantity());
+            int outboundCount = orderItemInstanceMapper.countOutboundByOrderItemId(itemEntity.getId());
+            int returnCount = orderItemInstanceMapper.countReturnByOrderItemId(itemEntity.getId());
+            itemResponse.setQuantity(quantity);
+            itemResponse.setOutboundScannedCount(outboundCount);
+            itemResponse.setReturnScannedCount(returnCount);
+            itemResponse.setOutboundScanned(outboundCount >= quantity);
+            itemResponse.setReturnScanned(returnCount >= quantity);
             props.add(itemResponse);
         }
 
@@ -801,6 +939,7 @@ public class OrderApplicationService {
         response.setUseScene(order.getUseScene());
         response.setSpecialRemark(order.getSpecialRemark());
         response.setCancelReason(order.getCancelReason());
+        response.setCancelType(order.getCancelType());
         UserEntity demander = userMapper.selectById(order.getDemanderUserId());
         if (demander != null) {
             response.setDemanderName(demander.getNickname());
@@ -813,9 +952,9 @@ public class OrderApplicationService {
         response.setDate(TimeUtils.formatDate(order.getCreatedAt()));
         response.setPropIds(propIds);
         response.setProps(props);
-        int propCount = itemEntities.size();
-        int outboundScannedCount = (int) itemEntities.stream().filter(item -> "scanned".equals(item.getOutboundStatus())).count();
-        int returnScannedCount = (int) itemEntities.stream().filter(item -> "scanned".equals(item.getReturnStatus())).count();
+        int propCount = itemEntities.stream().mapToInt(item -> normalizeQuantity(item.getQuantity())).sum();
+        int outboundScannedCount = orderItemInstanceMapper.countOutboundScannedByOrderId(order.getId());
+        int returnScannedCount = orderItemInstanceMapper.countReturnScannedByOrderId(order.getId());
         response.setPropCount(propCount);
         response.setOutboundScannedCount(outboundScannedCount);
         response.setReturnScannedCount(returnScannedCount);
@@ -823,6 +962,13 @@ public class OrderApplicationService {
         response.setCanFactoryReject("pending_factory_confirm".equals(order.getOrderStatus()) && "paid".equals(order.getPayStatus()));
         response.setCanScanOutbound("wait_pickup".equals(order.getOrderStatus()) && propCount > 0 && outboundScannedCount < propCount);
         response.setCanScanReturn("renting".equals(order.getOrderStatus()) && propCount > 0 && outboundScannedCount >= propCount && returnScannedCount < propCount);
+        response.setCanCancel("demander".equals(currentUserSupport.getCurrentRole())
+            && List.of("pending_factory_confirm", "wait_pickup").contains(order.getOrderStatus())
+            && outboundScannedCount <= 0);
+        response.setCanSupplierCancelAfterConfirm("supplier".equals(currentUserSupport.getCurrentRole())
+            && "wait_pickup".equals(order.getOrderStatus())
+            && outboundScannedCount <= 0);
+        response.setCanContactService("renting".equals(order.getOrderStatus()));
         boolean demanderReviewed = orderReviewMapper.selectByOrderIdAndRole(order.getId(), "demander") != null;
         boolean supplierReviewed = orderReviewMapper.selectByOrderIdAndRole(order.getId(), "supplier") != null;
         response.setDemanderReviewed(demanderReviewed);
@@ -843,35 +989,28 @@ public class OrderApplicationService {
         return response;
     }
 
-    private Long ensureSingleSupplier(List<PropEntity> props) {
-        Long supplierUserId = props.isEmpty() ? null : props.get(0).getSupplierUserId();
-        boolean crossSupplier = props.stream().anyMatch(item -> !supplierUserId.equals(item.getSupplierUserId()));
-        if (crossSupplier) {
-            throw new BizException(ResultCode.CONFLICT, "当前版本暂不支持跨工厂混合下单，请按工厂分别提交方案");
-        }
-        if (supplierUserId == null) {
-            throw new BizException(ResultCode.CONFLICT, "方案中的道具未绑定所属工厂，暂时无法下单");
-        }
-        return supplierUserId;
-    }
-
     private RentalOrderEntity buildOrderEntity(ProjectSchemeEntity project,
                                                Long demanderUserId,
                                                Long supplierUserId,
                                                List<PropEntity> props,
+                                               Map<Long, Integer> quantityByPropId,
                                                LocalDate rentalStartDate,
                                                LocalDate rentalEndDate,
                                                int rentalDays,
                                                CreateOrderRequest request,
                                                String batchNo,
                                                int splitIndex) {
-        int dailyRentAmountFen = props.stream().mapToInt(item -> defaultZero(item.getDailyRentPriceFen())).sum();
+        int dailyRentAmountFen = props.stream()
+            .mapToInt(item -> defaultZero(item.getDailyRentPriceFen()) * quantityByPropId.getOrDefault(item.getId(), 1))
+            .sum();
         long rentAmountFenLong = (long) dailyRentAmountFen * rentalDays;
         if (rentAmountFenLong > Integer.MAX_VALUE) {
             throw new BizException(ResultCode.VALIDATION_ERROR, "租赁金额超出系统限制");
         }
         int rentAmountFen = (int) rentAmountFenLong;
-        int depositAmountFen = props.stream().mapToInt(item -> defaultZero(item.getDepositAmountFen())).sum();
+        int depositAmountFen = props.stream()
+            .mapToInt(item -> defaultZero(item.getDepositAmountFen()) * quantityByPropId.getOrDefault(item.getId(), 1))
+            .sum();
 
         RentalOrderEntity order = new RentalOrderEntity();
         order.setOrderNo("ORD-" + System.currentTimeMillis() + "-" + splitIndex + "-" + UUID.randomUUID().toString().substring(0, 6));
@@ -898,11 +1037,12 @@ public class OrderApplicationService {
         return order;
     }
 
-    private List<RentalOrderItemEntity> buildOrderItems(Long orderId, List<PropEntity> props) {
+    private List<RentalOrderItemEntity> buildOrderItems(Long orderId, List<PropEntity> props, Map<Long, Integer> quantityByPropId) {
         return props.stream().map(prop -> {
             RentalOrderItemEntity item = new RentalOrderItemEntity();
             item.setOrderId(orderId);
             item.setPropId(prop.getId());
+            item.setQuantity(quantityByPropId.getOrDefault(prop.getId(), 1));
             item.setPropNameSnapshot(prop.getPropName());
             item.setImageUrlSnapshot(prop.getImageUrl());
             item.setDailyRentPriceFenSnapshot(prop.getDailyRentPriceFen());
@@ -986,6 +1126,26 @@ public class OrderApplicationService {
         return value == null ? 0 : value;
     }
 
+    private int normalizeQuantity(Integer quantity) {
+        if (quantity == null) {
+            return 1;
+        }
+        if (quantity < 1) {
+            throw new BizException(ResultCode.VALIDATION_ERROR, "quantity must be greater than 0");
+        }
+        return quantity;
+    }
+
+    private boolean isPropOrderableWithStock(PropEntity prop, int quantity) {
+        if (prop == null
+            || !"filled".equals(prop.getFillStatus())
+            || !"approved".equals(prop.getAuditStatus())
+            || !"idle".equals(prop.getPropStatus())) {
+            return false;
+        }
+        return propInstanceMapper.countByPropIdAndStatus(prop.getId(), "idle") >= quantity;
+    }
+
     private int calculateRentalDays(LocalDate startDate, LocalDate endDate) {
         if (startDate == null || endDate == null) {
             throw new BizException(ResultCode.VALIDATION_ERROR, "请选择租赁起止日期");
@@ -1024,11 +1184,39 @@ public class OrderApplicationService {
         if (!List.of("demander", "supplier").contains(currentRole)) {
             return false;
         }
-        if (!List.of("wait_pickup", "renting", "wait_review").contains(order.getOrderStatus())) {
+        if (!canRoleApplyDisputeAtStage(order.getOrderStatus(), currentRole)) {
             return false;
         }
-        Long currentUserId = currentUserSupport.requireCurrentUserId();
-        return disputeMapper.countByOrderAndApplicant(order.getId(), currentUserId, currentRole) <= 0;
+        if (disputeMapper.countPendingByOrderId(order.getId()) > 0) {
+            return false;
+        }
+        return disputeMapper.countByOrderStageAndRole(order.getId(), order.getOrderStatus(), currentRole) <= 0;
+    }
+
+    private boolean canRoleApplyDisputeAtStage(String orderStatus, String currentRole) {
+        return ("renting".equals(orderStatus) && "demander".equals(currentRole))
+            || ("wait_review".equals(orderStatus) && "supplier".equals(currentRole));
+    }
+
+    private DisputeReasonConfigEntity resolveDisputeReason(String stage, String role, String reasonCode) {
+        DisputeReasonConfigEntity config = null;
+        if (reasonCode != null && !reasonCode.isBlank()) {
+            config = disputeReasonConfigMapper.selectEnabledByCode(stage, role, reasonCode.trim());
+        }
+        if (config == null) {
+            List<DisputeReasonConfigEntity> options = disputeReasonConfigMapper.selectEnabled(stage, role);
+            if (!options.isEmpty()) {
+                config = options.get(0);
+            }
+        }
+        if (config == null) {
+            config = new DisputeReasonConfigEntity();
+            config.setStage(stage);
+            config.setApplicantRole(role);
+            config.setReasonCode("other");
+            config.setReasonLabel("其他");
+        }
+        return config;
     }
 
     private DisputeResponse toDisputeResponse(DisputeEntity entity) {
@@ -1043,8 +1231,13 @@ public class OrderApplicationService {
         response.setApplicantRoleText("supplier".equals(entity.getApplicantRole()) ? "工厂方" : "租赁方");
         response.setApplyStage(entity.getApplyStage());
         response.setApplyStageText(disputeStageText(entity.getApplyStage()));
+        response.setReasonCode(entity.getReasonCode());
+        response.setReasonLabel(entity.getReasonLabel());
         response.setClaimAmount(MoneyUtils.fenToYuan(entity.getClaimAmountFen()));
+        response.setAdminDecisionAmount(MoneyUtils.fenToYuan(entity.getAdminDecisionAmountFen()));
         response.setDepositAmount(MoneyUtils.fenToYuan(entity.getDepositAmountFenSnapshot()));
+        response.setFundEffectStatus(entity.getFundEffectStatus());
+        response.setAdminActionType(entity.getAdminActionType());
         response.setEvidenceUrls(entity.getEvidenceUrls());
         response.setEvidenceImages(parseEvidenceImages(entity.getEvidenceUrls()));
         response.setStatus(entity.getDisputeStatus());
@@ -1112,6 +1305,33 @@ public class OrderApplicationService {
 
     private String normalizeOptionalText(String value) {
         return value == null ? "" : value.trim();
+    }
+
+    private String normalizeEvidenceUrls(String value) {
+        String normalized = normalizeOptionalText(value);
+        if (normalized.isBlank()) {
+            return "";
+        }
+        List<String> urls = java.util.Arrays.stream(normalized.split("[,;\\n]"))
+            .map(String::trim)
+            .filter(item -> !item.isBlank())
+            .toList();
+        for (String url : urls) {
+            if (isTemporaryEvidencePath(url)) {
+                throw new BizException(ResultCode.VALIDATION_ERROR, "仲裁证据图片必须先上传后再提交");
+            }
+        }
+        return String.join(",", urls);
+    }
+
+    private boolean isTemporaryEvidencePath(String url) {
+        String lower = url.toLowerCase();
+        return lower.startsWith("wxfile://")
+            || lower.startsWith("http://tmp/")
+            || lower.startsWith("https://tmp/")
+            || lower.startsWith("blob:")
+            || lower.startsWith("file://")
+            || lower.contains("/tmp/");
     }
 
     private boolean isTrue(Integer value) {

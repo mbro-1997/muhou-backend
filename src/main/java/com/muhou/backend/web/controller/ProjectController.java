@@ -44,17 +44,24 @@ public class ProjectController {
 
     @PostMapping("/editing/items")
     public ApiResponse<ProjectResponse> addToEditing(@Valid @RequestBody AddProjectItemRequest request) {
-        return ApiResponse.success(projectApplicationService.addPropToEditingProject(request.getPropId()));
+        return ApiResponse.success(projectApplicationService.addPropToEditingProject(request.getPropId(), request.getQuantity()));
     }
 
     @PostMapping("/{projectId}/items")
     public ApiResponse<ProjectResponse> addToProject(@PathVariable Long projectId, @Valid @RequestBody AddProjectItemRequest request) {
-        return ApiResponse.success(projectApplicationService.addPropToProject(projectId, request.getPropId()));
+        return ApiResponse.success(projectApplicationService.addPropToProject(projectId, request.getPropId(), request.getQuantity()));
     }
 
     @DeleteMapping("/{projectId}/items/{propId}")
     public ApiResponse<ProjectResponse> removeItem(@PathVariable Long projectId, @PathVariable Long propId) {
         return ApiResponse.success(projectApplicationService.removePropFromProject(projectId, propId));
+    }
+
+    @PutMapping("/{projectId}/items/{propId}")
+    public ApiResponse<ProjectResponse> updateItemQuantity(@PathVariable Long projectId,
+                                                           @PathVariable Long propId,
+                                                           @Valid @RequestBody AddProjectItemRequest request) {
+        return ApiResponse.success(projectApplicationService.updatePropQuantity(projectId, propId, request.getQuantity()));
     }
 
     @PutMapping("/{projectId}")

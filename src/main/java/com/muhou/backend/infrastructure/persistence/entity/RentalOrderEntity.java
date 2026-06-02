@@ -34,6 +34,7 @@ public class RentalOrderEntity {
     private LocalDateTime reviewedAt;
     private LocalDateTime cancelledAt;
     private String cancelReason;
+    private String cancelType;
     private Integer depositRefundedFlag;
     private String remark;
     private Long createdBy;
@@ -97,6 +98,8 @@ public class RentalOrderEntity {
     public void setCancelledAt(LocalDateTime cancelledAt) { this.cancelledAt = cancelledAt; }
     public String getCancelReason() { return cancelReason; }
     public void setCancelReason(String cancelReason) { this.cancelReason = cancelReason; }
+    public String getCancelType() { return cancelType; }
+    public void setCancelType(String cancelType) { this.cancelType = cancelType; }
     public Integer getDepositRefundedFlag() { return depositRefundedFlag; }
     public void setDepositRefundedFlag(Integer depositRefundedFlag) { this.depositRefundedFlag = depositRefundedFlag; }
     public String getRemark() { return remark; }

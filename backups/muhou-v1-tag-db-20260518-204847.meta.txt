@@ -1,0 +1,9 @@
+﻿backup_file=D:\java\SourceTreeData\muhou-backend\backups\muhou-v1-tag-db-20260518-204847.sql
+created_at=2026-05-18 20:48:51
+database=muhou
+host=127.0.0.1
+port=3306
+backend_branch=dev
+backend_commit=1d5436b6deedf5e9228c012fb5a47c7b0e361ad8
+backend_tags=pre-inventory-model-refactor-20260512,tag
+reason=backup before SKU/SN inventory refactor; corresponds to current tagged old database structure

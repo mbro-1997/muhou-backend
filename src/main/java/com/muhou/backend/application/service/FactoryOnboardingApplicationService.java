@@ -136,7 +136,7 @@ public class FactoryOnboardingApplicationService {
         entity.setCompanyName(request.getFactoryName());
         entity.setFactoryName(request.getFactoryName());
         entity.setUnifiedSocialCreditCode(request.getUnifiedSocialCreditCode().trim().toUpperCase(Locale.ROOT));
-        entity.setBusinessLicenseUrl(request.getBusinessLicenseUrl());
+        entity.setBusinessLicenseUrl(requirePersistedImageUrl(request.getBusinessLicenseUrl(), "businessLicenseUrl"));
         entity.setContactName(request.getContactName());
         entity.setContactPhone(request.getContactPhone());
         entity.setFactoryAddress(request.getFactoryAddress());
@@ -147,6 +147,24 @@ public class FactoryOnboardingApplicationService {
 
         userMapper.updateRegisterStatus(userId, "factory_pending");
         return toFactoryAuditStatusResponse(factoryAuditMapper.selectById(entity.getId()));
+    }
+
+    private String requirePersistedImageUrl(String url, String fieldName) {
+        String normalized = url == null ? "" : url.trim();
+        if (normalized.isBlank()) {
+            throw new BizException(ResultCode.VALIDATION_ERROR, fieldName + " is required");
+        }
+        String lower = normalized.toLowerCase(Locale.ROOT);
+        if (lower.startsWith("wxfile://")
+            || lower.startsWith("file://")
+            || lower.startsWith("blob:")
+            || lower.startsWith("http://tmp")
+            || lower.startsWith("https://tmp")
+            || lower.contains("tempfilepath")
+            || lower.contains("/tmp/")) {
+            throw new BizException(ResultCode.VALIDATION_ERROR, "Image must be uploaded before submitting business data");
+        }
+        return normalized;
     }
 
     public FactoryAuditStatusResponse getCurrentFactoryAuditStatus() {

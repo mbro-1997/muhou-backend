@@ -15,7 +15,10 @@ public class DisputeResponse {
     private String applicantRoleText;
     private String applyStage;
     private String applyStageText;
+    private String reasonCode;
+    private String reasonLabel;
     private BigDecimal claimAmount;
+    private BigDecimal adminDecisionAmount;
     private BigDecimal depositAmount;
     private String evidenceUrls;
     private List<String> evidenceImages;
@@ -27,6 +30,8 @@ public class DisputeResponse {
     private String resolutionType;
     private String resolutionTypeText;
     private String refundStatus;
+    private String fundEffectStatus;
+    private String adminActionType;
 
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
@@ -48,8 +53,14 @@ public class DisputeResponse {
     public void setApplyStage(String applyStage) { this.applyStage = applyStage; }
     public String getApplyStageText() { return applyStageText; }
     public void setApplyStageText(String applyStageText) { this.applyStageText = applyStageText; }
+    public String getReasonCode() { return reasonCode; }
+    public void setReasonCode(String reasonCode) { this.reasonCode = reasonCode; }
+    public String getReasonLabel() { return reasonLabel; }
+    public void setReasonLabel(String reasonLabel) { this.reasonLabel = reasonLabel; }
     public BigDecimal getClaimAmount() { return claimAmount; }
     public void setClaimAmount(BigDecimal claimAmount) { this.claimAmount = claimAmount; }
+    public BigDecimal getAdminDecisionAmount() { return adminDecisionAmount; }
+    public void setAdminDecisionAmount(BigDecimal adminDecisionAmount) { this.adminDecisionAmount = adminDecisionAmount; }
     public BigDecimal getDepositAmount() { return depositAmount; }
     public void setDepositAmount(BigDecimal depositAmount) { this.depositAmount = depositAmount; }
     public String getEvidenceUrls() { return evidenceUrls; }
@@ -72,4 +83,8 @@ public class DisputeResponse {
     public void setResolutionTypeText(String resolutionTypeText) { this.resolutionTypeText = resolutionTypeText; }
     public String getRefundStatus() { return refundStatus; }
     public void setRefundStatus(String refundStatus) { this.refundStatus = refundStatus; }
+    public String getFundEffectStatus() { return fundEffectStatus; }
+    public void setFundEffectStatus(String fundEffectStatus) { this.fundEffectStatus = fundEffectStatus; }
+    public String getAdminActionType() { return adminActionType; }
+    public void setAdminActionType(String adminActionType) { this.adminActionType = adminActionType; }
 }

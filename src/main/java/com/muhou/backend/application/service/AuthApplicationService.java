@@ -6,8 +6,10 @@ import com.muhou.backend.common.exception.BizException;
 import com.muhou.backend.common.support.CurrentUserSupport;
 import com.muhou.backend.infrastructure.client.AuthLoginResult;
 import com.muhou.backend.infrastructure.client.WechatAuthGateway;
+import com.muhou.backend.infrastructure.persistence.entity.AdminAccountEntity;
 import com.muhou.backend.infrastructure.persistence.entity.UserEntity;
 import com.muhou.backend.infrastructure.persistence.entity.UserWechatEntity;
+import com.muhou.backend.infrastructure.persistence.mapper.AdminAccountMapper;
 import com.muhou.backend.infrastructure.persistence.mapper.FactoryAuditMapper;
 import com.muhou.backend.infrastructure.persistence.mapper.FactoryProfileMapper;
 import com.muhou.backend.infrastructure.persistence.mapper.UserMapper;
@@ -15,6 +17,7 @@ import com.muhou.backend.infrastructure.persistence.mapper.UserRoleMapper;
 import com.muhou.backend.infrastructure.persistence.mapper.UserWechatMapper;
 import com.muhou.backend.web.response.AuthLoginResponse;
 import com.muhou.backend.web.response.DemoAccountResponse;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -37,6 +40,20 @@ public class AuthApplicationService {
         "已绑定 admin + supplier，可进入管理员端并切换工厂视角"
     );
 
+    private static final DemoAccountSpec FACTORY_DEMO_A = new DemoAccountSpec(
+        "factory_demo_a",
+        4L,
+        "factory_demo_a",
+        "supplier only; factory A for split-order demo"
+    );
+
+    private static final DemoAccountSpec FACTORY_DEMO_B = new DemoAccountSpec(
+        "factory_demo_b",
+        5L,
+        "factory_demo_b",
+        "supplier only; factory B for split-order demo"
+    );
+
     private static final DemoAccountSpec NEW_USER_DEMO = new DemoAccountSpec(
         "new_user_demo",
         6L,
@@ -51,6 +68,7 @@ public class AuthApplicationService {
     private final UserWechatMapper userWechatMapper;
     private final FactoryProfileMapper factoryProfileMapper;
     private final FactoryAuditMapper factoryAuditMapper;
+    private final AdminAccountMapper adminAccountMapper;
     private final CurrentUserSupport currentUserSupport;
     private final FactoryOnboardingApplicationService factoryOnboardingApplicationService;
 
@@ -61,6 +79,7 @@ public class AuthApplicationService {
                                   UserWechatMapper userWechatMapper,
                                   FactoryProfileMapper factoryProfileMapper,
                                   FactoryAuditMapper factoryAuditMapper,
+                                  AdminAccountMapper adminAccountMapper,
                                   CurrentUserSupport currentUserSupport,
                                   FactoryOnboardingApplicationService factoryOnboardingApplicationService) {
         this.wechatAuthGateway = wechatAuthGateway;
@@ -70,6 +89,7 @@ public class AuthApplicationService {
         this.userWechatMapper = userWechatMapper;
         this.factoryProfileMapper = factoryProfileMapper;
         this.factoryAuditMapper = factoryAuditMapper;
+        this.adminAccountMapper = adminAccountMapper;
         this.currentUserSupport = currentUserSupport;
         this.factoryOnboardingApplicationService = factoryOnboardingApplicationService;
     }
@@ -89,6 +109,8 @@ public class AuthApplicationService {
     public List<DemoAccountResponse> listDemoAccounts() {
         return List.of(
             toDemoAccountResponse(DEMANDER_DEMO),
+            toDemoAccountResponse(FACTORY_DEMO_A),
+            toDemoAccountResponse(FACTORY_DEMO_B),
             toDemoAccountResponse(ADMIN_DEMO),
             toDemoAccountResponse(NEW_USER_DEMO)
         );
@@ -117,6 +139,37 @@ public class AuthApplicationService {
             true
         );
         return buildAuthLoginResponse(user, mockResult, snapshot);
+    }
+
+    public AuthLoginResponse adminLogin(String username, String password) {
+        String normalizedUsername = username == null ? "" : username.trim();
+        AdminAccountEntity account = adminAccountMapper.selectByUsername(normalizedUsername);
+        if (account == null || account.getEnabled() == null || account.getEnabled() != 1) {
+            throw new BizException(ResultCode.UNAUTHORIZED, "管理员账号或密码错误");
+        }
+        if (!new BCryptPasswordEncoder().matches(password == null ? "" : password, account.getPasswordHash())) {
+            throw new BizException(ResultCode.UNAUTHORIZED, "管理员账号或密码错误");
+        }
+        List<String> roles = userRoleMapper.selectRoleCodesByUserId(account.getUserId());
+        if (!roles.contains("admin")) {
+            throw new BizException(ResultCode.FORBIDDEN, "该账号未绑定管理员角色");
+        }
+        UserEntity user = userMapper.selectById(account.getUserId());
+        if (user == null) {
+            throw new BizException(ResultCode.NOT_FOUND, "管理员用户不存在");
+        }
+        adminAccountMapper.updateLastLogin(account.getId());
+
+        AuthLoginResponse response = new AuthLoginResponse();
+        response.setToken(currentUserSupport.generateToken(user.getId(), "admin"));
+        response.setUserId(user.getId());
+        response.setCurrentRole("admin");
+        response.setRoleBindings(roles);
+        response.setRegisterStatus(user.getRegisterStatus());
+        response.setDefaultEntry("admin_home");
+        response.setNeedRoleSelection(false);
+        response.setMock(false);
+        return response;
     }
 
     private AuthLoginResponse buildAuthLoginResponse(UserEntity user,
@@ -160,6 +213,8 @@ public class AuthApplicationService {
         }
         return switch (accountKey.trim().toLowerCase(Locale.ROOT)) {
             case "demander_demo" -> DEMANDER_DEMO;
+            case "factory_demo_a" -> FACTORY_DEMO_A;
+            case "factory_demo_b" -> FACTORY_DEMO_B;
             case "admin_demo" -> ADMIN_DEMO;
             case "new_user_demo" -> NEW_USER_DEMO;
             default -> throw new BizException(ResultCode.VALIDATION_ERROR, "不支持的演示账号: " + accountKey);

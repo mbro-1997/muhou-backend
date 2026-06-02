@@ -46,11 +46,6 @@ public class OrderController {
         return ApiResponse.success(orderApplicationService.getOrder(orderId));
     }
 
-    @PostMapping("/orders")
-    public ApiResponse<OrderResponse> create(@Valid @RequestBody CreateOrderRequest request) {
-        return ApiResponse.success(orderApplicationService.createOrder(request));
-    }
-
     @PostMapping("/orders/checkout")
     public ApiResponse<PayResponse> checkout(@Valid @RequestBody CreateOrderRequest request) {
         return ApiResponse.success(orderApplicationService.checkoutProjectOrders(request));
@@ -69,6 +64,16 @@ public class OrderController {
     @PostMapping("/factory/orders/{orderId}/reject")
     public ApiResponse<OrderResponse> reject(@PathVariable Long orderId, @Valid @RequestBody FactoryRejectOrderRequest request) {
         return ApiResponse.success(orderApplicationService.rejectOrderByFactory(orderId, request.getRejectReason()));
+    }
+
+    @PostMapping("/orders/{orderId}/cancel")
+    public ApiResponse<OrderResponse> cancelByDemander(@PathVariable Long orderId) {
+        return ApiResponse.success(orderApplicationService.cancelOrderByDemander(orderId));
+    }
+
+    @PostMapping("/factory/orders/{orderId}/cancel-after-confirm")
+    public ApiResponse<OrderResponse> cancelAfterConfirmByFactory(@PathVariable Long orderId) {
+        return ApiResponse.success(orderApplicationService.cancelAfterConfirmByFactory(orderId));
     }
 
     @PostMapping("/factory/orders/{orderId}/outbound-scan/{propId}")
